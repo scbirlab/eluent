@@ -20,7 +20,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 
-def _save_json(obj, filename: str) -> None:
+def save_json(obj, filename: str) -> None:
       import json
       with open(filename, "w") as f:
           json.dump(obj, f)

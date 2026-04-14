@@ -17,7 +17,7 @@ DEFAULT_CACHE = CACHE_DIR
 
 def _get_data_path(
     filename: str, 
-    env_key: str = DUVIDA_CACHE,
+    env_key: str = ELUENT_CACHE,
     default: str = DEFAULT_CACHE
 ) -> str:
     """Returns the path to a writable version of a package data file.

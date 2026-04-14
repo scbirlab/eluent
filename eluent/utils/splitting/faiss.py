@@ -123,19 +123,18 @@ def annotate_faiss_components(
     ds.drop_index(f"{fingerprint_column}_idx") 
 
     if isinstance(ds, Dataset):
-        desc1 = {"desc": "Annotating components"}
-        desc2 = {"desc": "Annotating splits"}
+        desc = {"desc": "Annotating components"}
     else:
-        desc1 = desc2 = {}
-    return ds.map(
+        desc = {}
+    return N, ds.map(
         _annotate_component,
         fn_kwargs={
             "disjoint_set": djs,
-            "component_column": "faiss_component",
+            "component_column": component_column,
         },
         with_indices=True, 
         batched=False,
-        **desc1,
+        **desc,
     )
 
 
@@ -145,6 +144,7 @@ def faiss_split(
     structure_column: str,
     input_representation: str = "smiles",
     fingerprint_column: str = "_faiss_fp_",
+    component_column: str = "faiss_component",
     n_neighbors: int = 10,
     batch_size: int = 1024,
     splits: Optional[Mapping[str, float]] = None,
@@ -158,7 +158,7 @@ def faiss_split(
     For an empty dataset, returns empty splits.
 
     """
-    ds = annotate_faiss_components(
+    N, ds = annotate_faiss_components(
         ds, 
         structure_column=structure_column,
         input_representation=input_representation,
@@ -179,6 +179,10 @@ def faiss_split(
         seed=seed,
     )
 
+    if isinstance(ds, Dataset):
+        desc = {"desc": "Annotating splits"}
+    else:
+        desc = {}
     ds = (
         ds
         .map(
@@ -190,7 +194,7 @@ def faiss_split(
             },
             batched=True,
             batch_size=batch_size,
-            **desc2,
+            **desc,
         )
     )
     if isinstance(ds, Dataset):

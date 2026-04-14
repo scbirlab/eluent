@@ -1,4 +1,4 @@
- """Command-line interface for duvidnn."""
+"""Command-line interface for eluent."""
 
 from argparse import FileType
 import os
