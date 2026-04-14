@@ -33,11 +33,38 @@ def annotate_scaffold(
     return x
 
 
+def annotate_scaffold_dataset(
+    ds: Union[Dataset, IterableDataset],
+    structure_column: str,
+    input_representation: str = "smiles",
+    scaffold_classifier: str = "scaffold",
+    scaffold_column: str = "scaffold",
+    batch_size: int = 1024
+) -> Union[Dataset, IterableDataset]:
+    """Run scaffold annotation over the dataset, returning an annotated copy."""
+    if isinstance(ds, Dataset):
+        desc = {"desc": "Annotating scaffold"}
+    else:
+        desc = {}
+    return ds.map(
+        annotate_scaffold,
+            fn_kwargs={
+                "structure_column": structure_column,
+                "input_representation": input_representation,
+                "scaffold_classifier": scaffold_classifier,
+                "scaffold_column": scaffold_column,
+            },
+            batched=True,
+            batch_size=batch_size,
+            **desc,
+    )
+
+
 @process_splits
 def scaffold_split(
     ds: Union[Dataset, IterableDataset],
     structure_column: str,
-    input_representation: str = 'smiles',
+    input_representation: str = "smiles",
     scaffold_classifier: str = "scaffold",
     scaffold_column: str = "scaffold",
     deterministic: bool = True,
@@ -50,20 +77,12 @@ def scaffold_split(
 
     """
 
-    ds = (
-        ds.
-        map(
-            annotate_scaffold,
-            fn_kwargs={
-                "structure_column": structure_column,
-                "input_representation": input_representation,
-                "scaffold_classifier": scaffold_classifier,
-                "scaffold_column": scaffold_column,
-            },
-            batched=True,
-            batch_size=batch_size,
-            desc="Annotating scaffold",
-        )
+    ds = annotate_scaffold_dataset(
+        ds,
+        structure_column=structure_column,
+        input_representation=input_representation,
+        scaffold_classifier=scaffold_classifier,
+        scaffold_column=scaffold_column,
     )
 
     scaffold_to_split = pack_bins(

@@ -7,6 +7,20 @@ class NumpyDisjointSet:
     
     With path-halving find and union-by-size.
 
+    Examples
+    ========
+    >>> ds = NumpyDisjointSet(5)
+    >>> ds.find(0)
+    0
+    >>> ds.merge(0, 1)
+    >>> ds.find(1) == ds.find(0)
+    True
+    >>> ds.merge(2, 3)
+    >>> ds.find(2) == ds.find(4)
+    False
+    >>> ds[3] == ds[2]
+    True
+
     """
     def __init__(self, n: int, memmap: bool = False, cache: str = "parent.npy"):
         self.size = np.ones(n, dtype=np.int32)

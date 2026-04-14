@@ -6,6 +6,23 @@ from functools import wraps
 
 def process_splits(f: Callable):
 
+    """Decorator to allow splitting functions to infer full 3-way split fractions.
+
+    Examples
+    ========
+    >>> @process_splits
+    ... def _echo(*args, splits=None, **kwargs):
+    ...     return splits
+    >>> _echo(train=0.8, validation=0.1, test=0.1) == {'train': 0.8, 'validation': 0.1, 'test': 0.1}
+    True
+    >>> result = _echo(train=0.8)
+    >>> 'train' in result and 'validation' in result
+    True
+    >>> _echo(splits={'train': 0.7, 'test': 0.3})['train']
+    0.7
+
+    """
+
     @wraps(f)
     def _process_splits(
         *args,

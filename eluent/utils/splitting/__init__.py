@@ -1,7 +1,8 @@
-
+"""Split datasets."""
 
 from typing import Union
 from datasets import Dataset, IterableDataset
+
 from .faiss import faiss_split
 from .scaffold import scaffold_split
 

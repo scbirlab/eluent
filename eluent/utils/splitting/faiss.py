@@ -57,24 +57,18 @@ def _annotate_component(
     return x
 
 
-@process_splits
-def faiss_split(
+def annotate_faiss_components(
     ds: Union[Dataset, IterableDataset],
     structure_column: str,
-    input_representation: str = 'smiles',
+    input_representation: str = "smiles",
     fingerprint_column: str = "_faiss_fp_",
     n_neighbors: int = 10,
     batch_size: int = 1024,
-    splits: Optional[Mapping[str, float]] = None,
-    deterministic: bool = True,
-    seed: int = 42,
-    cache: str = "./cache",
+    component_column: str = "faiss_component",
     gpu: bool = False
-):
-    """Approximate spectral split using FAISS and union-find.
-
-    For an empty dataset, returns empty splits.
-
+) -> Union[Dataset, IterableDataset]:
+    """Compute Morgan fingerprints, build FAISS k-NN graph, annotate components.
+    
     """
     faiss_index = faiss.IndexBinaryFlat(2048)  # Hamming/Jaccard on 2048-bit vectors
     ds = (
@@ -98,10 +92,6 @@ def faiss_split(
         device=0 if gpu else None,
         dtype=np.uint8,
     )
-    # ds.save_faiss_index(
-    #     f"{fingerprint_column}_idx", 
-    #     index_filename,
-    # )   # permanent on-disk index
 
     N = dataset_len(ds)
     djs = NumpyDisjointSet(N)
@@ -137,7 +127,7 @@ def faiss_split(
         desc2 = {"desc": "Annotating splits"}
     else:
         desc1 = desc2 = {}
-    ds = ds.map(
+    return ds.map(
         _annotate_component,
         fn_kwargs={
             "disjoint_set": djs,
@@ -145,9 +135,40 @@ def faiss_split(
         },
         with_indices=True, 
         batched=False,
-        **desc1
+        **desc1,
     )
 
+
+@process_splits
+def faiss_split(
+    ds: Union[Dataset, IterableDataset],
+    structure_column: str,
+    input_representation: str = "smiles",
+    fingerprint_column: str = "_faiss_fp_",
+    n_neighbors: int = 10,
+    batch_size: int = 1024,
+    splits: Optional[Mapping[str, float]] = None,
+    deterministic: bool = True,
+    seed: int = 42,
+    cache: str = "cache",
+    gpu: bool = False
+):
+    """Approximate spectral split using FAISS and union-find.
+
+    For an empty dataset, returns empty splits.
+
+    """
+    ds = annotate_faiss_components(
+        ds, 
+        structure_column=structure_column,
+        input_representation=input_representation,
+        fingerprint_column=fingerprint_column,
+        n_neighbors=n_neighbors,
+        batch_size=batch_size,
+        component_column=component_column,
+        gpu=gpu,
+
+    )
     component_to_split = pack_bins(
         ds,
         group_column="faiss_component",
@@ -169,10 +190,9 @@ def faiss_split(
             },
             batched=True,
             batch_size=batch_size,
-            **desc2
+            **desc2,
         )
     )
-
     if isinstance(ds, Dataset):
         desc = {"desc": "Generating split datasets"}
     else:

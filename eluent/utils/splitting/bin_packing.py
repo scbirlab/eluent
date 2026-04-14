@@ -1,6 +1,6 @@
 """Algorithm for packing groups into splits."""
 
-from typing import Dict, Mapping, Optional, Union
+from typing import Dict, Mapping, Optional, Tuple, Union
 
 from collections import Counter
 
@@ -17,7 +17,21 @@ def deterministic_packing_step(
     remaining: Mapping[str, int],
     group_to_split: Mapping[str, str],
     **kwargs
-):
+) -> Tuple[Dict]:
+    """Core step of bin backing.
+
+    Puts item into the bin with most remaining space.
+
+    Examples
+    ========
+    >>> remaining = {'train': 8, 'test': 4}
+    >>> g2s, remaining = deterministic_packing_step(3, 'scaffold_A', remaining, {})
+    >>> g2s['scaffold_A']
+    'train'
+    >>> remaining['train']
+    5
+    
+    """
     split_destination = max(remaining, key=remaining.__getitem__)
     group_to_split[group_name] = split_destination
     remaining[split_destination] -= group_size
@@ -59,6 +73,19 @@ def pack_bins(
     deterministic: bool = True,
     seed: int = 42
 ) -> Dict[str, str]:
+    """Pack a Dataset into defined bins/splits.
+
+    Examples
+    ========
+    >>> from datasets import Dataset
+    >>> ds = Dataset.from_dict({"group": ['A', 'A', 'A', 'B', 'B', 'C']})
+    >>> g2s = pack_bins(ds, group_column="group", splits={'train': 0.67, 'test': 0.33})
+    >>> set(g2s.values()) <= {'train', 'test'}
+    True
+    >>> g2s['A']   # largest group goes to train
+    'train'
+
+    """
     rng = np.random.default_rng(seed=seed)
     if num_rows is None:
         num_rows = dataset_len(ds)
