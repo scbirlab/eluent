@@ -105,7 +105,8 @@ def plot_chemical_splits(
         on_bits=True,
         return_dataframe=False,
     )
-    fps = [sorted(map(int, fp.split(";"))) for fp in fps]
+    # print(fps)
+    fps = [sorted(map(int, fp[0].split(";"))) for fp in fps]
     fp_matrix = scipy.sparse.lil_matrix(
         (len(fps), 2048), 
         dtype=np.float32,
@@ -113,13 +114,13 @@ def plot_chemical_splits(
     fp_matrix.rows = np.array(fps, dtype=object)
     fp_matrix.data = np.array(
         [np.ones(len(row), dtype=np.float32).tolist() for row in fps],
-        dtype=object
+        dtype=object,
     )
     fp_matrix = fp_matrix.tocsr()
 
     umapper = umap.UMAP(
-        metric='jaccard', 
-        min_dist=.6,
+        metric="jaccard", 
+        min_dist=.1,
         random_state=seed, 
         low_memory=True,
     )
@@ -139,7 +140,7 @@ def plot_chemical_splits(
     common_plot_kwargs = {
         "x": "umap1",
         "y": "umap2",
-        "s": 1., 
+        "s": 3., 
     }
         
     for ax, col in zip(axes, ["points"] + cols_to_plot):
@@ -148,13 +149,14 @@ def plot_chemical_splits(
             data=df,
             c='lightgrey',
             zorder=-5,
+            label="_none",
         )
         if col in split_columns:
             unique_labels = sorted(df[col].unique())
             binary = (len(unique_labels) == 2 and (unique_labels[0] in (True, 0)))
             for i, label in enumerate(unique_labels):
                 ax.scatter(
-                    **(common_plot_kwargs | ({"s": 5.} if (label in (True, 1) and binary) else {})),
+                    **(common_plot_kwargs | ({"s": 10.} if (label in (True, 1) and binary) else {})),
                     c="lightgrey" if (label in (False, 0) and binary) else f"C{i}",
                     data=df.query(f"{col} == @label"),
                     zorder=1,
@@ -185,7 +187,6 @@ def plot_chemical_splits(
                     fig.colorbar(sc, ax=ax)
                 except ValueError as e:
                     print_err(e)
-        ax.set(title=col)
-        ax.set_axis_off()
+        ax.set(title=col, xlabel="UMAP 1", ylabel="UMAP 2")
     
     return (fig, axes), df

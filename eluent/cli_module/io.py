@@ -9,10 +9,10 @@ def _resolve_and_slice_data(
     end: Optional[int] = None,
     batch_size: int = 1024
 ):
-    from ..base.data import DataMixinBase
+    from ..utils.datasets_io import AutoDataset
     # from .utils.datasets import to_dataset
 
-    candidates_ds = DataMixinBase._resolve_data(data)
+    candidates_ds = AutoDataset.load(data)._dataset
     nrows = candidates_ds.num_rows
     skip = start or 0
     take = (end or nrows) - skip
