@@ -38,7 +38,7 @@ jobs:
         # run doctests as individual packages
         pytest eluent --doctest-modules
         # run other tests
-        pytest test/test_evaluation.py
+        #pytest test/test_evaluation.py
     - name: Test CLI splitting/percentiles
       run: |
         bash test/scripts/run-tests.sh

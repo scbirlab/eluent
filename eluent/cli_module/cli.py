@@ -9,7 +9,6 @@ from carabiner.cliutils import CLIOption, CLICommand, CLIApp
 from .. import app_name, __version__
 
 from .percentile import _percentile
-from .predict import _predict
 from .split import _split
 
 
