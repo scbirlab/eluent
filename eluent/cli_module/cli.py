@@ -1,4 +1,4 @@
-"""Command-line interface for duvidnn."""
+ """Command-line interface for duvidnn."""
 
 from argparse import FileType
 import os
@@ -7,7 +7,6 @@ import sys
 from carabiner.cliutils import CLIOption, CLICommand, CLIApp
 
 from .. import app_name, __version__
-from ..checkpoint_utils import _load_json, save_json
 
 from .percentile import _percentile
 from .predict import _predict

@@ -19,7 +19,12 @@ else:
 import numpy as np
 from tqdm.auto import tqdm
 
-from ..checkpoint_utils import save_json
+
+def _save_json(obj, filename: str) -> None:
+      import json
+      with open(filename, "w") as f:
+          json.dump(obj, f)
+
 
 def to_dataset(
     ds: IterableDataset,
@@ -27,18 +32,27 @@ def to_dataset(
     nrows: Optional[int] = None,
     cache: str = "./cache"
 ) -> Dataset:
+    """Convert IterableDataset to Dataset.
+
+    Examples
+    ========
+    >>> from datasets import Dataset
+    >>> ds = Dataset.from_dict({"x": [1, 2, 3]})
+    >>> to_dataset(ds) is ds
+    True
+
+    """
+
     from datasets import Dataset, concatenate_datasets
     if isinstance(ds, Dataset):
         return ds
     new_ds = None
     total_iter = np.ceil(nrows / batch_size).astype(int) if nrows is not None else None
     for record in tqdm(ds.iter(batch_size=batch_size), total=total_iter, desc="Building dataset"):
-        # print(record)
         if new_ds is not None:
             with TemporaryDirectory() as tmpdirname:
                 filename = os.path.join(tmpdirname, "add-record.json")
                 save_json(record, filename)
-                print(record)
                 new_ds = concatenate_datasets([new_ds, Dataset.from_json(filename, cache_dir=cache)])
         else:
             with TemporaryDirectory() as tmpdirname:

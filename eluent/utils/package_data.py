@@ -12,7 +12,7 @@ CACHE_DIR = user_cache_dir(
     version=__version__,
 )
 
-DUVIDA_CACHE = "DUVIDNN_CACHE"
+ELUENT_CACHE = "ELUENT_CACHE"
 DEFAULT_CACHE = CACHE_DIR
 
 def _get_data_path(
