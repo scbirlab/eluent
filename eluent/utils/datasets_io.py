@@ -1,6 +1,11 @@
+
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional, Union
+from functools import partial
 import hashlib
 import os
+import tempfile
+
+from carabiner import print_err
 
 from numpy.typing import ArrayLike
 
@@ -19,7 +24,7 @@ def hasher(s: str, n: int = 16) -> str:
     return hashlib.sha256(s).hexdigest()[:n]
 
 def _lock_path(cache_dir: str, key: str) -> str:
-    locks_dir = os.path.join(cache, ".locks")
+    locks_dir = os.path.join(cache_dir, ".locks")
     os.makedirs(locks_dir, exist_ok=True)
     h = hasher(key.encode("utf-8"))
     return os.path.join(locks_dir, f"{h}.lock")
@@ -80,7 +85,7 @@ def _load_from_dataframe(
 
     hash_name = hasher(dataframe.to_string())
     with tempfile.TemporaryDirectory() as tmpdir:
-        csv_filename = os.path.join(tmpdir, f"{hashname}.csv.gz")
+        csv_filename = os.path.join(tmpdir, f"{hash_name}.csv.gz")
         dataframe.to_csv(csv_filename, index=False)
         ds = _load_from_file(
             csv_filename, 
@@ -124,7 +129,7 @@ def _resolve_hf_hub_dataset(
         cache_dir=cache,
     )
     if isinstance(ds, DatasetDict):
-        ds = concatenate_datasets([v for key, v in dataset.items()])
+        ds = concatenate_datasets([v for key, v in ds.items()])
     return ds
 
 
