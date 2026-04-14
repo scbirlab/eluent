@@ -9,6 +9,7 @@ class NumpyDisjointSet:
 
     Examples
     ========
+    >>> import numpy as np; np.set_printoptions(legacy='1.25')
     >>> ds = NumpyDisjointSet(5)
     >>> ds.find(0)
     0

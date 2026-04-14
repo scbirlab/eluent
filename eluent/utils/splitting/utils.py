@@ -17,7 +17,6 @@ def annotate_split(
 
     Examples
     ========
-    >>> import numpy as np
     >>> comp_map = {"A": "train", "B": "test"}
     >>> out = annotate_split({"col": ["B", "A"]}, key_to_split=comp_map, key_column="col")
     >>> out['split']

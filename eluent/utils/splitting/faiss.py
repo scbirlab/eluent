@@ -26,10 +26,6 @@ def _morgan_fingerprint(
     ========
     >>> batch = {'smiles': ['CCO', 'CCC']}
     >>> out = _morgan_fingerprint(batch, structure_column='smiles')
-    >>> 'fp' in out
-    True
-    >>> isinstance(out['fp'], np.ndarray)
-    True
     >>> out['fp'].shape == (2, 2048 // 8)
     True
 
