@@ -9,7 +9,7 @@ OUTPUT_DIR=$(readlink -f "$script_dir"/..)/outputs
 CACHE="$OUTPUT_DIR/cache"
 OUTPUT="$OUTPUT_DIR/split"
 
-HF_HOME="$CACHE" duvidnn percentiles \
+HF_HOME="$CACHE" eluent percentiles \
     "$TRAIN" \
     --columns clogp tpsa \
     --percentiles 1 5 10 \
@@ -21,7 +21,7 @@ HF_HOME="$CACHE" duvidnn percentiles \
 
 for type in faiss scaffold
 do
-    HF_HOME="$CACHE" duvidnn split \
+    HF_HOME="$CACHE" eluent split \
         "$TRAIN" \
         --train .7 \
         --validation .15 \
