@@ -88,7 +88,7 @@ def main() -> None:
         help='Random seed. Default: determininstic.',
     )
     n_neighbors = CLIOption(
-        '--n-neighbors', '-n', 
+        '--n-neighbors', '-k', 
         type=int,
         default=10,
         help='Number of nearest neighbors for FAISS splitting.',
@@ -183,6 +183,7 @@ def main() -> None:
             cache,
             output_name,
             batch_size,
+            kfolds,
         ] + train_test_val,
         main=_split,
     )
