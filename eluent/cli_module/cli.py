@@ -78,7 +78,7 @@ def main() -> None:
         '--type', 
         type=str,
         default="scaffold",
-        choices=["scaffold", "faiss"],
+        choices=["random", "scaffold", "faiss"],
         help='Splitting method.',
     )
     random_seed = CLIOption(
@@ -101,6 +101,13 @@ def main() -> None:
             help='Fraction of examples for each split. Default: infer.',
         ) for key in ("train", "validation", "test")
     ]
+
+    kfolds = CLIOption(
+        '--kfolds', '-K',
+        type=int,
+        default=1,
+        help='Number of folds to generate training and validation. Overrides validation fraction, takes only training fraction.',
+    )
 
     columns = CLIOption(
         '--columns', '-c',
@@ -176,6 +183,7 @@ def main() -> None:
             cache,
             output_name,
             batch_size,
+            kfolds,
         ] + train_test_val,
         main=_split,
     )

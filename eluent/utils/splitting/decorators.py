@@ -29,6 +29,7 @@ def process_splits(f: Callable):
         train: float = 1.,
         validation: Optional[float] = None,
         test: Optional[float] = None,
+        kfolds: Optional[int] = None,
         splits: Optional[Mapping[str, float]] = None,
         **kwargs
     ) -> Callable:
@@ -37,6 +38,7 @@ def process_splits(f: Callable):
         kwarg_splits = {
             "train": train,
         }
+        # if kfolds is None:
         if validation > 0.:
             kwarg_splits["validation"] = validation
         if test > 0.:

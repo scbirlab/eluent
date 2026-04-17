@@ -58,7 +58,6 @@ def to_dataset(
             with TemporaryDirectory() as tmpdirname:
                 filename = os.path.join(tmpdirname, "init-record.json")
                 save_json(record, filename)
-                print(record)
                 new_ds = Dataset.from_json(filename, cache_dir=cache)
     return new_ds
 

@@ -1,22 +1,27 @@
 """Split datasets."""
 
-from typing import Union
-from datasets import Dataset, IterableDataset
+from typing import TYPE_CHECKING, Any, Mapping, Iterable, Union
 
-from .faiss import faiss_split
-from .scaffold import scaffold_split
+if TYPE_CHECKING:
+    from datasets import Dataset, DatasetDict, IterableDataset
+else:
+    Dataset, DatasetDict, IterableDataset = Any, Any, Any
 
-SPLIT_METHODS = {
-    "scaffold": scaffold_split,
-    "faiss": faiss_split,
-}
+from .splitter import SplitDataset
 
 def split_dataset(
     ds: Union[Dataset, IterableDataset],
-    method: str,
+    method: Union[str, Mapping, Iterable],
     *args, **kwargs
-):  
-    try:
-        return SPLIT_METHODS[method](ds, *args, **kwargs)
-    except KeyError:
-        raise KeyError(f"No method '{method}' for splitting")
+) -> DatasetDict:  
+    ds = SplitDataset(ds)
+    if not isinstance(method, (list, tuple)):
+        method = [method]
+    if len(method) == 0:
+        raise ValueError("No splitting methods provided!")
+    for _method in method:
+        if isinstance(_method, str):
+            ds = ds.group_and_split(method=_method, **kwargs)
+        elif isinstance(_method, Mapping):
+            ds = ds.group_and_split(**_method)
+    return ds.dataset

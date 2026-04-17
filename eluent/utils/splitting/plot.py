@@ -119,8 +119,8 @@ def plot_chemical_splits(
     fp_matrix = fp_matrix.tocsr()
 
     umapper = umap.UMAP(
-        metric="jaccard", 
-        min_dist=.1,
+        metric="cosine", 
+        # min_dist=.1,
         random_state=seed, 
         low_memory=True,
     )
@@ -144,26 +144,28 @@ def plot_chemical_splits(
     }
         
     for ax, col in zip(axes, ["points"] + cols_to_plot):
-        ax.scatter(
-            **common_plot_kwargs,
-            data=df,
-            c='lightgrey',
-            zorder=-5,
-            label="_none",
-        )
         if col in split_columns:
             unique_labels = sorted(df[col].unique())
             binary = (len(unique_labels) == 2 and (unique_labels[0] in (True, 0)))
             for i, label in enumerate(unique_labels):
                 ax.scatter(
                     **(common_plot_kwargs | ({"s": 10.} if (label in (True, 1) and binary) else {})),
-                    c="lightgrey" if (label in (False, 0) and binary) else f"C{i}",
+                    edgecolor="lightgrey" if (label in (False, 0) and binary) else f"C{i}",
+                    facecolor="none",
+                    linewidth=.5,
                     data=df.query(f"{col} == @label"),
                     zorder=1,
                     label="_none" if (label in (False, 0) and binary) else label,
                 )
             add_legend(ax)
         else:
+            ax.scatter(
+                **common_plot_kwargs,
+                data=df,
+                c='lightgrey',
+                zorder=-5,
+                label="_none",
+            )
             non_na_vals = df[col][~df[col].isna()]
             if all([
                 np.all(non_na_vals >= 0.),
