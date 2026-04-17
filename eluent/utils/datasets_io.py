@@ -31,7 +31,7 @@ def _lock_path(cache_dir: str, key: str) -> str:
 
 
 def _load_from_file(filename: str, cache: Optional[str] = None) -> Dataset:
-    from datasets import load_dataset, Dataset
+    from datasets import load_dataset, Dataset, DatasetDict
     from filelock import FileLock
 
     cache = cache or DEFAULT_CACHE
@@ -55,19 +55,26 @@ def _load_from_file(filename: str, cache: Optional[str] = None) -> Dataset:
         )
         lock_key = (protocol, "")
     elif filename.endswith(".hf"):
-        read_f = Dataset.load_from_disk
+        read_f = partial(
+            Dataset.load_from_disk, 
+            dataset_path=filename,
+        )
         lock_key = ("hf", "")
     else:
         raise IOError(f"Could not infer how to open '{filename}' from its extension.")
 
     # If no cache, nothing sensible to lock on
     if cache is None:
-        return read_f(filename)
+        ds = read_f()
 
     # Cross-task lock on the shared filesystem
     lockfile = _lock_path(cache, "_".join(lock_key))
     with FileLock(lockfile, timeout=60. * 60.):
-        return read_f(filename)
+        ds = read_f()
+    if isinstance(ds, DatasetDict):
+        return ds["train"]
+    else:
+        return ds
 
 
 def _load_from_dataframe(
