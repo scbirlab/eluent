@@ -21,10 +21,10 @@ def process_splits(fn: Callable):
     True
     >>> _echo(splits={'train': 0.7, 'test': 0.3})['train']
     0.7
-    >>> result = _echo(train=0.8, kfolds=5)
-    >>> sorted(result.keys()) == ['fold:0', 'fold:1', 'fold:2', 'fold:3', 'fold:4', 'test']
+    >>> result = _echo(train=0.8, kfolds=4)
+    >>> sorted(result.keys()) == ['test', 'train:fold=0', 'train:fold=1', 'train:fold=2', 'train:fold=3']
     True
-    >>> abs(result['fold:0'] - 0.16) < 1e-9
+    >>> abs(result['train:fold=0'] - 0.2) < 1e-9
     True
 
     """
