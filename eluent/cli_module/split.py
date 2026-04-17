@@ -93,10 +93,11 @@ def _split(args: Namespace) -> None:
                 cache=args.cache,
             )
             plot_outdir = os.path.dirname(args.plot)
+            if len(plot_outdir) > 0:
+                os.makedirs(plot_outdir, exist_ok=True)
             plot_root, ext = os.path.splitext(os.path.basename(args.plot))
             figsaver(
                 format=ext.lstrip("."), 
-                output_dir=os.path.dirname(args.plot),
-            )(fig, f"{plot_root}-fold_{i}", df=df)
+            )(fig, os.path.join(plot_outdir, f"{plot_root}-fold_{i}"), df=df)
 
     return None
