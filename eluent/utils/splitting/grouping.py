@@ -14,7 +14,6 @@ from schemist.features import calculate_feature
 from .bin_packing import pack_bins
 from .decorators import process_splits
 from .disjoint_set import NumpyDisjointSet
-from .utils import annotate_split
 
 GROUPING_FUNCTIONS: Dict[str, Callable] = {}
 
@@ -75,7 +74,7 @@ def _morgan_fingerprint(
     ========
     >>> batch = {'smiles': ['CCO', 'CCC']}
     >>> out = _morgan_fingerprint(batch, structure_column='smiles')
-    >>> out['fingerprint_column'].shape == (2, 2048 // 8)
+    >>> out['group'].shape == (2, 2048 // 8)
     True
 
     """
@@ -145,3 +144,23 @@ def _chemical_scaffold(
     else:
         converted = [converted]
     return converted
+
+
+@_assign_and_return
+def annotate_split(
+    x: Mapping[str, str], 
+    indices: Iterable[int],
+    key_to_split: Mapping[str, str],
+    group_column: str = "group"
+) -> Dict[str, ...]:
+    """Tag each entry with its split label.
+
+    Examples
+    ========
+    >>> comp_map = {"A": "train", "B": "test"}
+    >>> out = annotate_split({"col": ["B", "A"]}, indices=None, key_to_split=comp_map, group_column="col", column="split")
+    >>> out["split"]
+    ['test', 'train']
+
+    """
+    return [key_to_split.get(k) for k in x[group_column]]

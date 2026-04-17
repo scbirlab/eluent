@@ -7,8 +7,7 @@ from datasets import Dataset, DatasetDict, IterableDataset
 from .decorators import process_splits
 from .bin_packing import pack_bins
 from .faiss import add_faiss_index
-from .grouping import GROUPING_FUNCTIONS
-from .utils import annotate_split
+from .grouping import GROUPING_FUNCTIONS, annotate_split
 
 DEFAULT_BATCH_SIZE: int = 1024
 DEFAULT_SEED: int = 42
