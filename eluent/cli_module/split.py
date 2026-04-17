@@ -41,6 +41,7 @@ def _split(args: Namespace) -> None:
         train=args.train,
         validation=args.validation,
         test=args.test,
+        kfolds=args.kfolds,
         batch_size=args.batch,
         seed=args.seed or 42,
         deterministic=args.seed is not None,

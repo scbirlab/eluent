@@ -109,8 +109,9 @@ class SplitDataset:
             fn_kwargs={
                 "key_to_split": packed_bins,
                 "group_column": group_column,
-                "split_column": split_column,
+                "column": split_column,
             },
+            with_indices=True,
             batched=True,
             batch_size=batch_size,
             **desc,

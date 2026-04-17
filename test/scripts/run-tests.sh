@@ -27,7 +27,7 @@ do
         --validation .15 \
         -S smiles \
         --type "$type" \
-        -k 2 \
+        -n 2 \
         --seed 42 \
         --cache "$CACHE" \
         --output "$OUTPUT"/$type.csv \

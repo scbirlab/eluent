@@ -88,7 +88,7 @@ def main() -> None:
         help='Random seed. Default: determininstic.',
     )
     n_neighbors = CLIOption(
-        '--n-neighbors', '-k', 
+        '--n-neighbors', '-n', 
         type=int,
         default=10,
         help='Number of nearest neighbors for FAISS splitting.',
@@ -101,6 +101,13 @@ def main() -> None:
             help='Fraction of examples for each split. Default: infer.',
         ) for key in ("train", "validation", "test")
     ]
+
+    kfolds = CLIOption(
+        '--kfolds', '-K',
+        type=int,
+        default=1,
+        help='Number of folds to generate training and validation. Overrides validation fraction, takes only training fraction.',
+    )
 
     columns = CLIOption(
         '--columns', '-c',
