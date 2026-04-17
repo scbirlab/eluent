@@ -39,6 +39,15 @@ jobs:
         pytest eluent --doctest-modules
         # run other tests
         #pytest test/test_evaluation.py
-    - name: Test CLI splitting/percentiles
+    - name: Test CLI percentile
       run: |
-        bash test/scripts/run-tests.sh
+        bash test/scripts/run-percentile.sh
+    - name: Test CLI splitting - random
+      run: |
+        bash test/scripts/run-split.sh random
+    - name: Test CLI splitting - scaffold
+      run: |
+        bash test/scripts/run-percentile.sh scaffold
+    - name: Test CLI splitting - FAISS
+      run: |
+        bash test/scripts/run-percentile.sh faiss
