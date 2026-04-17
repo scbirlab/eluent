@@ -26,7 +26,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest pytest-cov
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install -e .[chem,bio,transformers,splits]
+        pip install -e .[dev]
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
@@ -45,9 +45,12 @@ jobs:
     - name: Test CLI splitting - random
       run: |
         bash test/scripts/run-split.sh random
+    - name: Test CLI splitting K-fold - random
+      run: |
+        bash test/scripts/run-split-k.sh random
     - name: Test CLI splitting - scaffold
       run: |
-        bash test/scripts/run-percentile.sh scaffold
+        bash test/scripts/run-split.sh scaffold
     - name: Test CLI splitting - FAISS
       run: |
-        bash test/scripts/run-percentile.sh faiss
+        bash test/scripts/run-split.sh faiss
