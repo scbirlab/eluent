@@ -1,266 +1,404 @@
 # Usage
 
-## Fast and flexible reading and random access of very large files
+## Input data formats
 
-Subsets of lines from very large, optionally compressed, files can be read quickly 
-into memory. for example, we can read the first 10,000 lines of an arbitrarily large 
-file:
+**eluent** accepts two kinds of input:
 
-```python
->>> from carabiner.io import get_lines
-
->>> get_lines("big-table.tsv.gz", lines=10_000)
-```
-
-Or random access of specific lines. Hundreds of millions of lines can be 
-parsed per minute.
-
-```python
->>> get_lines("big-table.tsv.gz", lines=[999999, 10000000, 100000001])
-```
-
-This pattern will allow sampling a random subset:
-
-```python
->>> from random import sample
->>> from carabiner.io import count_lines, get_lines
-
->>> number_of_lines = count_lines("big-table.tsv.gz")
->>> line_sample = sample(range(number_of_lines), k=1000)
->>> get_lines("big-table.tsv.gz", lines=line_sample)
-```
-
-### Reading tabular data
-
-With this backend, we can read subsets of very large files more quickly 
-and flexibly than plain `pandas.read_csv`. Formats (delimiters) including Excel 
-are inferred from file extensions, but can also be over-ridden with the `format` 
-parameter.
-
-```python
->>> from carabiner.pd import read_table
-
->>> read_table("big-table.tsv.gz", lines=10_000)
-```
-
-The same fast random access is availavble as for reading lines. Hundreds of 
-millions of records can be looped through per minute.
-
-```python
->>> from random import sample
->>> from carabiner.io import count_lines, get_lines
-
->>> number_of_lines = count_lines("big-table.tsv.gz")
->>> line_sample = sample(range(number_of_lines), k=1000)
->>> read_table("big-table.tsv.gz", lines=line_sample)
-```
-
-## Utilities to simplify building command-line apps
-
-The standard library `argparse` is robust but verbose when building command-line apps with several sub-commands, each with many options. `carabiner.cliutils` smooths this process. Apps are built by defining `CLIOptions` which are then assigned to `CLICommands` directing the functions to run when called, which then form part of a `CLIApp`.
-
-First define the options:
-```python
-inputs = CLIOption('inputs',
-                    type=str,
-                    default=[],
-                    nargs='*',
-                    help='')
-output = CLIOption('--output', '-o', 
-                    type=FileType('w'),
-                    default=sys.stdout,
-                    help='Output file. Default: STDOUT')
-formatting = CLIOption('--format', '-f', 
-                        type=str,
-                        default='TSV',
-                        choices=['TSV', 'CSV', 'tsv', 'csv'],
-                        help='Format of files. Default: %(default)s')
-```
-
-Then the commands:
-
-```python
-test = CLICommand("test",
-                    description="Test CLI subcommand using Carabiner utilities.",
-                    options=[inputs, output, formatting],
-                    main=_main)
-```
-
-The same options can be assigned to multiple commands if necessary.
-
-Fianlly, define the app and run it:
-
-```python
-
-app = CLIApp("Carabiner", 
-             version=__version__,
-             description="Test CLI app using Carabiner utilities.",
-             commands=[test])
-
-app.run()
-```
-## Reservoir sampling
-
-If you need to sample a random subset from an iterator of unknown length by looping through only once, you can use this pure python implementation of [reservoir sampling](https://en.wikipedia.org/wiki/Reservoir_sampling).
-
-An important limitation is that while the population to be sampled is not necessarily in memory, the sampled population must fit in memory.
-
-Originally written in [Python Bugs](https://bugs.python.org/issue41311).
-
-Based on [this GitHub Gist](https://gist.github.com/oscarbenjamin/4c1b977181f34414a425f68589e895d1).
-
-```python
->>> from carabiner.random import sample_iter
->>> from string import ascii_letters
->>> from itertools import chain
->>> from random import seed
->>> seed(1)
->>> sample_iter(chain.from_iterable(ascii_letters for _ in range(1000000)), 10)
-['X', 'c', 'w', 'q', 'T', 'e', 'u', 'w', 'E', 'h']
->>> seed(1)
->>> sample_iter(chain.from_iterable(ascii_letters for _ in range(1000000)), 10, shuffle_output=False)
-['T', 'h', 'u', 'X', 'E', 'e', 'w', 'q', 'c', 'w']
+- **Local files** — CSV (`.csv`), Parquet (`.parquet`), Arrow (`.arrow`), or a
+  Hugging Face Datasets directory. The format is inferred automatically from the file
+  extension.
+- **Remote datasets** — any dataset hosted on the
+  [🤗 Hugging Face Datasets Hub](https://huggingface.co/datasets), specified using a
+  `hf://` URL:
 
 ```
-
-## Multikey dictionaries
-
-Conveniently return the values of multiple keys from a dictionary without manually looping.
-
-```python
->>> from carabiner.collections import MultiKeyDict
->>> d = MultiKeyDict(a=1, b=2, c=3)
->>> d
-{'a': 1, 'b': 2, 'c': 3}
->>> d['c']
-{'c': 3}
->>> d['a', 'b']
-{'a': 1, 'b': 2} 
+hf://datasets/<owner>/<repo>~<config>:<split>
 ```
 
-## Decorators
+For example, to use the training split of the Fang 2023 ADME benchmark:
 
-`carabiner` provides several decorators to facilitate functional programming.
-
-### Vectorized functions
-
-In scientific programming frameworks like `numpy` we are used to functions which take a scalar or vector and apply to every element. It is occasionally useful to convert functions from arbitrary packages to behave in a vectorized manner on Python iterables.
-
-Scalar functions can be converted to a vectorized form easily using `@vectorize`.
-
-```python
->>> @vectorize
-... def vector_adder(x): return x + 1
-...
->>> list(vector_adder(range(3)))
-[1, 2, 3]
->>> list(vector_adder((4, 5, 6)))
-[5, 6, 7]
->>> vector_adder([10])
-11
->>> vector_adder(10)
-11
+```
+hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train
 ```
 
-### Return `None` instead of error
+Output files are written in the format inferred from the `--output` filename extension.
 
-When it is useful for a function to not fail, but have a testable indicator of success, you can wrap in `@return_none_on_error`.
+---
 
-```python
->>> def error_maker(x): raise KeyError
-... 
->>> @return_none_on_error
-... def error_maker2(x): raise KeyError
-... 
->>> @return_none_on_error(exception=ValueError)
-... def error_maker3(x): raise KeyError
-... 
+## Command-line interface
 
->>> error_maker('a')  # Causes an error
-Traceback (most recent call last):
-File "<stdin>", line 1, in <module>
-File "<stdin>", line 1, in error_maker
-KeyError
+Run `eluent --help` to see all sub-commands:
 
->>> error_maker2('a')  # Wrapped returns None
+```
+usage: eluent [-h] [--version] {split,percentiles} ...
 
->>> error_maker3('a')  # Only catches ValueError
-Traceback (most recent call last):
-File "<stdin>", line 1, in <module>
-File ".../carabiner/decorators.py", line 59, in wrapped_function
-    
-File "<stdin>", line 2, in error_maker3
-KeyError
+Chemistry-aware splitting of large datasets.
+
+options:
+  -h, --help            show this help message and exit
+  --version, -v         show program's version number and exit
+
+Sub-commands:
+  {split,percentiles}
+    split               Make chemical train-test-val splits on out-of-core datasets.
+    percentiles         Add columns indicating whether rows are in a percentile.
 ```
 
-### Decorators with parameters
+---
 
-Sometimes a decorator has optional parameters to control its behavior. It's convenient to use it in the form `@decorator` when you want the default behavior, or `@decorator(*kwargs)` when you want to custmize the behavior. Usually this requires some convoluted code, but this has been packed up into `@decorator_with_params`, to decorate your decorator definitions!
+### `eluent split`
 
-```python
->>> def decor(f, suffix="World"): 
-...     return lambda x: f(x + suffix)
-...
->>> @decor
-... def printer(x): 
-...     print(x)
-... 
+Partition a dataset into train / validation / test splits. The pipeline has two stages:
 
-# doesn't work, raises an error!
->>> @decor(suffix="everyone")  
-... def printer2(x): 
-...     print(x)
-... 
-Traceback (most recent call last):
-File "<stdin>", line 1, in <module>
-TypeError: decor() missing 1 required positional argument: 'f'
+1. **Grouping** — each row is assigned to a group according to the chosen method.
+2. **Bin-packing** — groups are packed into the requested split fractions. When `--seed`
+   is provided, groups are packed randomly (reproducibly); otherwise a deterministic
+   first-fit-decreasing algorithm is used.
 
-# decorate the decorator!
->>> @decorator_with_params
-... def decor2(f, suffix="World"): 
-...     return lambda x: f(x + suffix)
-... 
+#### Full option reference
 
-# Now it works!
->>> @decor2(suffix="everyone")  
-... def printer3(x): 
-...     print(x)
-... 
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `input_file` | — | — | Input file or `hf://` URL. **Required.** |
+| `--type` | — | `scaffold` | Grouping method: `random`, `scaffold`, or `faiss`. |
+| `--structure` | `-S` | — | Column containing chemical structure strings. |
+| `--input-representation` | `-R` | `smiles` | Structure format: `smiles`, `selfies`, `inchi`, `aa_seq`. |
+| `--train` | — | — | Fraction of examples for training. **Required.** |
+| `--validation` | — | inferred | Fraction of examples for validation. |
+| `--test` | — | inferred | Fraction of examples for test. |
+| `--kfolds` | `-K` | `1` | Generate _k_ cross-validation folds (overrides `--validation`). |
+| `--seed` | `-i` | — | Random seed. Omit for deterministic packing. |
+| `--n-neighbors` | `-k` | `10` | Number of nearest neighbours for FAISS grouping. |
+| `--batch` | `-b` | `16` | Batch size for dataset mapping. |
+| `--cache` | — | `.` | Directory for intermediate FAISS caches. |
+| `--output` | `-o` | — | Output filename. **Required.** |
+| `--plot` | — | — | Filename for UMAP embedding plot (requires `--structure`). |
+| `--plot-sample` | `-n` | `20000` | Number of molecules to subsample for UMAP. |
+| `--plot-seed` | `-e` | `42` | Random seed for UMAP layout. |
+| `--extras` | `-x` | — | Additional columns to colour in the UMAP plot. |
+| `--start` | — | `0` | First row of the dataset to process. |
+| `--end` | — | end | Last row of the dataset to process. |
 
->>> printer("Hello ")
-Hello World
->>> printer3("Hello ")
-Hello everyone
+#### Splitting methods
+
+##### Random
+
+Each row is assigned a reproducible pseudo-random group ID by hashing its index with the
+provided seed. Groups are then packed into splits.
+
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type random \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --seed 42 \
+    --output split/random.csv \
+    --plot split/random-plot.png
 ```
 
-## Colorblind palette
+##### Scaffold
 
-Here's a qualitative palette that's colorblind friendly.
+Molecules are grouped by their Murcko scaffold. All molecules sharing the same scaffold are
+placed in the same split, preventing the model from seeing related scaffolds during both
+training and evaluation. This is the default and the standard method for chemistry ML benchmarks.
 
-```python
->>> from carabiner import colorblind_palette
-
->>> colorblind_palette()
-('#EE7733', '#0077BB', '#33BBEE', '#EE3377', '#CC3311', '#009988', '#BBBBBB', '#000000')
-
-# subsets
->>> colorblind_palette(range(2))
-('#EE7733', '#0077BB')
->>> colorblind_palette(slice(3, 6))
-('#EE3377', '#CC3311', '#009988')
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type scaffold \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --output split/scaffold.csv \
+    --plot split/scaffold-plot.png
 ```
 
-## Grids with sensible defaults in Matplotlib
+##### FAISS spectral splitting
 
-While `plt.subplots()` is very flexible, it requires many defaults to be defined. Instead, `carabiner.mpl.grid()` generates the `fig, ax` tuple with sensible defaults of a 1x1 grid with panel size 3 and a `constrained` layout.
+Morgan fingerprints (2048-bit) are computed for each molecule. A binary k-NN graph is built
+using a FAISS flat Hamming index. Connected components of the graph form groups, so all
+molecules within a component are mutually similar.
 
-```python
-from carabiner.mpl import grid
-fig, ax = grid()  # 1x1 grid
-fig, ax = grid(ncol=3)  # 1x3 grid; figsize expands appropriately
-fig, ax = grid(ncol=3, nrow=2, sharex=True)  #additional parameters are passed to `plt.subplots()`
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type faiss \
+    --structure smiles \
+    --n-neighbors 10 \
+    --train 0.7 \
+    --validation 0.15 \
+    --seed 42 \
+    --cache ./cache \
+    --output split/faiss.csv \
+    --plot split/faiss-plot.png
 ```
 
-## Fast indicator matrix x dense matrix multiplication in Tensorflow
+#### k-fold cross-validation
 
-If you want to multiply an indicator matrix, i.e. a sparse matrix of zeros and ones with the same number of non-zero entries per row (as in linear models), as part of a Tensorflow model, this pattern will be faster than using `tensorflow.SparseMatrix` if you convert the indicator matrix to a `[n x 1]` matrix providing the index of the non-zero element per row.
+Pass `--kfolds K` to generate _K_ train/validation splits. The `--validation` fraction is
+distributed evenly among folds. Each fold is written to a separate subdirectory:
+
+```
+split/
+  fold_0/
+    scaffold_train.csv
+    scaffold_validation.csv
+  fold_1/
+    scaffold_train.csv
+    scaffold_validation.csv
+  ...
+```
+
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type scaffold \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --kfolds 5 \
+    --seed 42 \
+    --output split/scaffold.csv
+```
+
+---
+
+### `eluent percentiles`
+
+Add boolean annotation columns to a dataset indicating which rows fall within a top-_k_
+percentile. Uses a T-Digest quantile sketch so the dataset never needs to be loaded into
+memory in full.
+
+For each `(column, percentile)` pair, a column named `<column>_top_<percentile>_pc` is
+added, containing `True` for rows in the top percentile and `False` otherwise.
+
+#### Full option reference
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `input_file` | — | — | Input file or `hf://` URL. **Required.** |
+| `--columns` | `-c` | — | Column names to annotate. **Required.** |
+| `--percentiles` | `-p` | `5` | Percentile thresholds (e.g. `1 5 10`). |
+| `--reverse` | `-r` | — | Tag bottom percentiles instead of top. |
+| `--compression` | `-z` | `500` | T-Digest centroids; higher is more accurate. |
+| `--delta` | `-d` | `1.0` | Buffer width around the percentile cutoff for the "maybe" zone. |
+| `--batch` | `-b` | `16` | Batch size. |
+| `--cache` | — | `.` | Cache directory. |
+| `--output` | `-o` | — | Output filename. **Required.** |
+| `--plot` | — | — | Filename for UMAP plot (requires `--structure`). |
+| `--structure` | `-S` | — | Column with chemical structure strings (for plotting). |
+| `--input-representation` | `-R` | `smiles` | Structure format. |
+| `--plot-sample` | `-n` | `20000` | Subsample size for UMAP. |
+| `--plot-seed` | `-e` | `42` | Random seed for UMAP. |
+| `--extras` | `-x` | — | Additional columns to colour in the UMAP plot. |
+| `--start` | — | `0` | First row to process. |
+| `--end` | — | end | Last row to process. |
+
+#### Example
+
+Tag the top 1 %, 5 %, and 10 % of cLogP and TPSA values, then save a UMAP plot coloured
+by each percentile column:
+
+```bash
+$ eluent percentiles \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --columns clogp tpsa \
+    --percentiles 1 5 10 \
+    --batch 128 \
+    --cache ./cache \
+    --output percentiles/tagged.csv \
+    --plot percentiles/tagged-plot.png \
+    --structure smiles
+```
+
+---
+
+## Python API
+
+### Splitting datasets
+
+#### `split_dataset` — high-level function
+
+```python
+from datasets import load_dataset
+from eluent.utils.splitting import split_dataset
+
+ds = load_dataset(
+    "scbirlab/fang-2023-biogen-adme",
+    "scaffold-split",
+    split="train",
+)
+
+# Scaffold split — 70 % train, 15 % validation, 15 % test (inferred)
+split = split_dataset(
+    ds,
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+)
+print(split)
+# DatasetDict({
+#     train:      Dataset(...),
+#     validation: Dataset(...),
+#     test:       Dataset(...),
+# })
+```
+
+The `method` argument accepts `"random"`, `"scaffold"`, or `"faiss"`. Extra keyword
+arguments are forwarded to the underlying grouping function.
+
+```python
+# Random split with reproducible seed
+split = split_dataset(
+    ds,
+    method="random",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+    seed=42,
+)
+
+# FAISS spectral split
+split = split_dataset(
+    ds,
+    method="faiss",
+    structure_column="smiles",
+    n_neighbors=10,
+    train=0.7,
+    validation=0.15,
+    seed=42,
+    cache="./cache",
+)
+```
+
+You can also pass a list of method dicts to chain grouping steps:
+
+```python
+split = split_dataset(
+    ds,
+    method=[{"method": "scaffold", "structure_column": "smiles", "train": 0.7, "validation": 0.15}],
+)
+```
+
+#### `split_dataset` with k-fold cross-validation
+
+When `kfolds > 1`, the function returns a **tuple** of `DatasetDict`s:
+
+```python
+folds = split_dataset(
+    ds,
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+    kfolds=5,
+)
+for i, fold in enumerate(folds):
+    print(f"Fold {i}: {fold['train'].num_rows} train, {fold['validation'].num_rows} val")
+```
+
+#### `SplitDataset` — low-level class
+
+`SplitDataset` wraps a dataset and provides separate `group()` and `split()` steps for
+fine-grained control.
+
+```python
+from eluent.utils.splitting.splitter import SplitDataset
+
+sd = SplitDataset(ds)
+
+# Step 1: annotate each row with a group label
+sd.dataset = sd.group(
+    method="scaffold",
+    structure_column="smiles",
+    group_column="my_group",
+)
+
+# Step 2: pack groups into splits
+result = sd.split(
+    group_column="my_group",
+    splits={"train": 0.7, "validation": 0.15, "test": 0.15},
+    seed=42,
+)
+# result is a DatasetDict
+```
+
+Or use the combined helper:
+
+```python
+sd.group_and_split(
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+)
+result = sd.dataset
+```
+
+---
+
+### Annotating percentiles
+
+#### `percentiles` — high-level function
+
+```python
+from datasets import load_dataset
+from eluent.utils.splitting.top_k import percentiles
+
+ds = load_dataset(
+    "scbirlab/fang-2023-biogen-adme",
+    "scaffold-split",
+    split="train",
+    streaming=True,
+)
+
+tagged = percentiles(
+    ds=ds,
+    q={
+        "clogp": [1, 5, 10],
+        "tpsa":  [5],
+    },
+    compression=500,  # T-Digest centroids — higher is more accurate
+    delta=1.0,        # buffer around percentile boundary
+    cache="./cache",
+)
+# New boolean columns: clogp_top_1_pc, clogp_top_5_pc,
+#                      clogp_top_10_pc, tpsa_top_5_pc
+```
+
+Use `reverse=True` to tag the _bottom_ percentiles instead:
+
+```python
+tagged = percentiles(
+    ds=ds,
+    q={"clogp": [5]},
+    reverse=True,
+)
+# clogp_top_5_pc is True for the lowest 5 % of clogp values
+```
+
+#### `get_percentile` — single column, single threshold
+
+For more direct control, call `get_percentile` after building a `TDigest` manually:
+
+```python
+from tdigest import TDigest
+from eluent.utils.splitting.top_k import get_percentile
+
+digest = TDigest(K=500)
+for batch in ds.iter(batch_size=1024):
+    digest.batch_update(batch["clogp"])
+
+tagged = get_percentile(
+    ds=ds,
+    column="clogp",
+    digest=digest,
+    p=5.0,
+    count=len(ds),
+    delta=1.0,
+    cache="./cache",
+)
+```
