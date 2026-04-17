@@ -95,7 +95,17 @@ def pack_bins(
         sizes.update(example[group_column])
 
     print_err(f"There are {len(sizes)} unique groups.")
-    
+        # Verify all unique groups were captured
+    all_unique_groups = set(ds.unique(group_column))
+    captured_groups = set(sizes.keys())
+    if all_unique_groups != captured_groups:
+        missing_groups = all_unique_groups - captured_groups
+        print_err(f"[WARNING] Some groups were not captured. Missing: {missing_groups}")
+        # Capture missing groups
+        for group in missing_groups:
+            group_count = sum(1 for ex in ds.iter(batch_size=batch_size) if group in ex[group_column])
+            sizes[group] = group_count
+
     group_to_split = {}
     split_target_sizes = {
         key: np.ceil(num_rows * val) for key, val in splits.items()

@@ -111,7 +111,6 @@ class SplitDataset:
                 "group_column": group_column,
                 "column": split_column,
             },
-            with_indices=True,
             batched=True,
             batch_size=batch_size,
             **desc,
@@ -126,6 +125,7 @@ class SplitDataset:
             for key in splits
         } | {k: v for k, v in self.dataset.items() if k != key})
 
+    @process_splits
     def group_and_split(
         self,
         method: Union[str, Callable],
@@ -147,7 +147,6 @@ class SplitDataset:
             preprocess=preprocess,
             **kwargs,
         )
-        print(self.dataset)
         dataset = self.split(
             key=key,
             group_column=group_column,

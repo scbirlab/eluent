@@ -17,7 +17,7 @@ HF_HOME="$CACHE" eluent split \
     --validation .15 \
     -S smiles \
     --type "$TYPE" \
-    -n 2 \
+    -k 2 \
     --seed 42 \
     --cache "$CACHE" \
     --output "$OUTPUT"/$TYPE.csv \

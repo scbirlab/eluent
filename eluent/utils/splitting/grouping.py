@@ -146,21 +146,24 @@ def _chemical_scaffold(
     return converted
 
 
-@_assign_and_return
 def annotate_split(
     x: Mapping[str, str], 
-    indices: Iterable[int],
     key_to_split: Mapping[str, str],
-    group_column: str = "group"
+    group_column: str = "group",
+    column: str = "split"
 ) -> Dict[str, ...]:
     """Tag each entry with its split label.
 
     Examples
     ========
     >>> comp_map = {"A": "train", "B": "test"}
-    >>> out = annotate_split({"col": ["B", "A"]}, indices=None, key_to_split=comp_map, group_column="col", column="split")
+    >>> out = annotate_split({"col": ["B", "A"]}, key_to_split=comp_map, group_column="col", column="split")
     >>> out["split"]
     ['test', 'train']
 
     """
-    return [key_to_split.get(k) for k in x[group_column]]
+    missing = [k for k in x[group_column] if k not in key_to_split]
+    if missing:
+        raise ValueError(f"Groups not found in split mapping: {set(missing)}")
+    x[column] = [key_to_split.get(k) for k in x[group_column]]
+    return x

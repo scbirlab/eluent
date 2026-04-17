@@ -38,11 +38,11 @@ def process_splits(f: Callable):
         kwarg_splits = {
             "train": train,
         }
-        if kfolds is None:
-            if validation > 0.:
-                kwarg_splits["validation"] = validation
-            if test > 0.:
-                kwarg_splits["test"] = test
+        # if kfolds is None:
+        if validation > 0.:
+            kwarg_splits["validation"] = validation
+        if test > 0.:
+            kwarg_splits["test"] = test
         splits = splits or {}
         kwarg_splits.update(splits)  # override defaults, add arbitrary extra
 
