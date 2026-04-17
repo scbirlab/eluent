@@ -1,10 +1,11 @@
 """Wrapping core algorithms with convenience."""
 
 from typing import Callable, Mapping, Optional
-
 from functools import wraps
 
-def process_splits(f: Callable):
+from carabiner import print_err
+
+def process_splits(fn: Callable):
 
     """Decorator to allow splitting functions to infer full 3-way split fractions.
 
@@ -23,29 +24,38 @@ def process_splits(f: Callable):
 
     """
 
-    @wraps(f)
-    def _process_splits(
+    @wraps(fn)
+    def _fn(
         *args,
         train: float = 1.,
         validation: Optional[float] = None,
         test: Optional[float] = None,
-        kfolds: Optional[int] = None,
+        kfolds: int = 1,
         splits: Optional[Mapping[str, float]] = None,
         **kwargs
     ) -> Callable:
-        validation = validation or (1. - train)
-        test = test or (1. - train - validation)
-        kwarg_splits = {
-            "train": train,
-        }
-        # if kfolds is None:
-        if validation > 0.:
-            kwarg_splits["validation"] = validation
-        if test > 0.:
-            kwarg_splits["test"] = test
-        splits = splits or {}
-        kwarg_splits.update(splits)  # override defaults, add arbitrary extra
+        if kfolds == 1:
+            validation = validation or (1. - train)
+            test = test or (1. - train - validation)
+            _splits = {
+                "train": train,
+            }
+            if validation > 0.:
+                _splits["validation"] = validation
+            if test > 0.:
+                _splits["test"] = test
+        else:
+            print_err(f"{k=}, so ignoring {test=}")
+            test = test or (1. - train)
+            _splits = {
+                f"train:{int(k)}": train,
+            }
+            if test > 0.:
+                _splits["test"] = test
+        _splits.update(splits or {})  # override defaults, add arbitrary extra
+        split_total = sum(_splits.values())
+        _splits = {key: val / split_total for key, val in _splits.items()}
 
-        return f(*args, **kwargs, splits=kwarg_splits)
+        return fn(*args, **kwargs, splits=_splits)
 
-    return _process_splits
+    return _fn
