@@ -1,5 +1,5 @@
 """Base splitting object."""
-from typing import Callable, Iterable, Mapping, Optional, Union
+from typing import Callable, Iterable, Mapping, Optional, Tuple, Union
 from functools import partial
 
 from datasets import Dataset, DatasetDict, IterableDataset
@@ -38,7 +38,9 @@ class SplitDataset:
                 raise ValueError(
                     f"Grouping method '{method}' is not implemented. Try one of these: {', '.join(GROUPING_FUNCTIONS)}"
                 )
-        elif not isinstance(method, Callable):
+        elif isinstance(method, Callable):
+            group_fn = method
+        else:
             raise ValueError(
                 f"Grouping method '{method}' must be a string or function. Instead, it was `{type(method)}`"
             )
@@ -49,13 +51,14 @@ class SplitDataset:
                 **kwargs
             )
 
+        ds = self.dataset[key]
         if preprocess is not None and isinstance(preprocess, Callable):
-            ds, info = preprocess(self.dataset[key])
+            ds, info = preprocess(ds)
         else:
-            ds, info = self.dataset[key], None
+            ds, info = ds, None
         if info is not None and isinstance(info, dict):
             kwargs |= info
-        if isinstance(self.dataset, Dataset):
+        if isinstance(ds, Dataset):
             desc = {"desc": f"Setting groups using {method}"}
         else:
             desc = {}
@@ -70,8 +73,6 @@ class SplitDataset:
             )
         } | {k: v for k, v in self.dataset.items() if k != key})
 
-
-    @process_splits
     def split(
         self,
         key: str = "train",
@@ -82,7 +83,7 @@ class SplitDataset:
         batch_size: int = DEFAULT_BATCH_SIZE,
         splits: Optional[Mapping[str, float]] = None,
         **kwargs
-    ) -> Union[Dataset, IterableDataset]:
+    ) -> Union[DatasetDict, Tuple[DatasetDict, ...]]:
 
         """Split a dataset based on grouping.
 
@@ -120,10 +121,28 @@ class SplitDataset:
             desc = {"desc": "Generating split datasets"}
         else:
             desc = {}
-        return DatasetDict({
-            key: ds.filter(lambda x: x["split"] == key, **desc)
-            for key in splits
-        } | {k: v for k, v in self.dataset.items() if k != key})
+        if splits is None:
+            splits = {}
+        fold_keys = [k for k in splits if ":fold=" in k]
+        nonfold_keys = set(k for k in splits if ":fold=" not in k)
+        if len(fold_keys) > 0:
+            return tuple(
+                DatasetDict({
+                    "train": ds.filter(lambda x, k=_fold: x[split_column] != k and x[split_column] in fold_keys, **desc),
+                    "validation": ds.filter(lambda x, k=_fold: x[split_column] == k, **desc),
+                }
+                | {
+                    _split: ds.filter(lambda x, k=_split: x[split_column] == k, **desc)
+                    for _split in nonfold_keys
+                }
+                | {k: v for k, v in self.dataset.items() if k != key})
+                for _fold in fold_keys
+            )
+        else:
+            return DatasetDict({
+                _split: ds.filter(lambda x, k=_split: x[split_column] == k, **desc)
+                for _split in splits
+            } | {k: v for k, v in self.dataset.items() if k != key})
 
     @process_splits
     def group_and_split(

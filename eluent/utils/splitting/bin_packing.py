@@ -64,6 +64,7 @@ def random_packing_step(
     remaining[split_destination] -= group_size
     return group_to_split, remaining
 
+
 def pack_bins(
     ds: Union[Dataset, IterableDataset],
     group_column: str,

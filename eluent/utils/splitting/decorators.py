@@ -3,7 +3,7 @@
 from typing import Callable, Mapping, Optional
 from functools import wraps
 
-from carabiner import print_err
+from carabiner import pprint_dict, print_err
 
 def process_splits(fn: Callable):
 
@@ -21,6 +21,11 @@ def process_splits(fn: Callable):
     True
     >>> _echo(splits={'train': 0.7, 'test': 0.3})['train']
     0.7
+    >>> result = _echo(train=0.8, kfolds=5)
+    >>> sorted(result.keys()) == ['fold:0', 'fold:1', 'fold:2', 'fold:3', 'fold:4', 'test']
+    True
+    >>> abs(result['fold:0'] - 0.16) < 1e-9
+    True
 
     """
 
@@ -45,16 +50,18 @@ def process_splits(fn: Callable):
             if test > 0.:
                 _splits["test"] = test
         else:
-            print_err(f"{k=}, so ignoring {test=}")
+            print_err(f"{kfolds=}, so ignoring {validation=}")
             test = test or (1. - train)
             _splits = {
-                f"train:{int(k)}": train,
+                f"train:fold={i}": train / kfolds
+                for i in range(kfolds)
             }
             if test > 0.:
                 _splits["test"] = test
         _splits.update(splits or {})  # override defaults, add arbitrary extra
         split_total = sum(_splits.values())
         _splits = {key: val / split_total for key, val in _splits.items()}
+        pprint_dict(_splits, message="[INFO] Inferred these split proportions")
 
         return fn(*args, **kwargs, splits=_splits)
 
