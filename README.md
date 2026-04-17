@@ -1,49 +1,44 @@
-# 🧐 duvidnn
+# eluent
 
-![GitHub Workflow Status (with branch)](https://img.shields.io/github/actions/workflow/status/scbirlab/duvidnn/python-publish.yml)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/duvidnn)
-![PyPI](https://img.shields.io/pypi/v/duvidnn)
+![GitHub Workflow Status (with branch)](https://img.shields.io/github/actions/workflow/status/scbirlab/eluent/python-publish.yml)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/eluent)
+![PyPI](https://img.shields.io/pypi/v/eluent)
 
-**duvidnn** is a suite of python tools for calculating confidence and information metrics 
-for deep learning. It provides a higher-level framework for calculating confidence and information metrics
-of general purpose, taxonomic and chemistry-specific neural networks. 
+**eluent** is a Python library and command-line tool for chemistry-aware splitting of large datasets
+for machine learning. It provides three grouping strategies — random, Murcko scaffold, and approximate
+spectral clustering via FAISS — along with out-of-core percentile annotation. All operations work
+on datasets that don't fit in memory, using [🤗 Hugging Face Datasets](https://huggingface.co/docs/datasets/)
+for lazy processing and caching.
 
-As a bonus, **duvidnn** also provides an easy command-line interface for training and testing models.
+## Contents
 
 - [Installation](#installation)
-- [Command-line interface](#command-line-interface)
-- [Python API](#python-api)
-    - [Neural networks](#neural-networks)
-    - [More advanced API](#more-advanced-python-api-implementing-a-new-modelbox)
+- [Usage](#usage)
+  - [Input data formats](#input-data-formats)
+  - [Command-line interface](#command-line-interface)
+    - [Dataset splitting](#dataset-splitting-eluent-split)
+    - [Percentile annotation](#percentile-annotation-eluent-percentiles)
+  - [Python API](#python-api)
+    - [Splitting datasets](#splitting-datasets)
+    - [Annotating percentiles](#annotating-percentiles)
 - [Issues, problems, suggestions](#issues-problems-suggestions)
 - [Documentation](#documentation)
+- [Roadmap](#roadmap)
 
 ## Installation
 
 ### The easy way
 
-You can install the precompiled version directly using `pip`.
+You can install the pre-compiled version directly using `pip`.
 
 ```bash
-$ pip install duvidnn
+$ pip install eluent
 ```
 
-If you want to use duvidnn for chemistry machine learning and AI, use:
+For GPU-accelerated FAISS splitting, install the optional GPU extra:
 
 ```bash
-$ pip install duvidnn[chem]
-```
-
-For integrating taxonomic information with [vectome](https://github.com/scbirlab/vectome), use:
-
-```bash
-$ pip install duvidnn[bio]
-```
-
-You can install both:
-
-```bash
-$ pip install duvidnn[bio,chem]
+$ pip install eluent[splits_gpu]
 ```
 
 ### From source
@@ -54,348 +49,341 @@ Clone the repository, then `cd` into it. Then run:
 $ pip install -e .
 ```
 
-## Command-line interface
+## Usage
 
-**duvidnn** has a command-line interface for training and checkpointing the built-in models. 
+### Input data formats
 
-```bash
-$ duvidnn --help
-usage: duvidnn [-h] [--version] {hyperprep,train,predict,split,percentiles} ...
+In all cases, the input dataset can be:
 
-Calculating exact and approximate confidence and information metrics for deep learning on general purpose and chemistry tasks.
+- A path to a **local file** in CSV, Parquet, Arrow, or HF Dataset directory format (format is
+  inferred from the file extension).
+- A **remote dataset** hosted on [🤗 Datasets Hub](https://huggingface.co/datasets), specified
+  as a `hf://` URL:
+
+```
+hf://datasets/<owner>/<repo>~<config>:<split>
+```
+
+For example:
+
+```
+hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train
+```
+
+Output files are written in the format inferred from the extension of `--output`
+(CSV, Parquet, Arrow, or HF Dataset directory).
+
+### Command-line interface
+
+**eluent** provides two sub-commands. Run `eluent --help` to see the top-level help:
+
+```
+usage: eluent [-h] [--version] {split,percentiles} ...
+
+Chemistry-aware splitting of large datasets.
 
 options:
   -h, --help            show this help message and exit
   --version, -v         show program's version number and exit
 
 Sub-commands:
-  {hyperprep,train,predict,split,percentiles}
-                        Use these commands to specify the tool you want to use.
-    hyperprep           Prepare inputs for hyperparameter search.
-    train               Train a PyTorch model.
-    predict             Make predictions and calculate uncertainty using a duvidnn checkpoint.
+  {split,percentiles}
     split               Make chemical train-test-val splits on out-of-core datasets.
     percentiles         Add columns indicating whether rows are in a percentile.
 ```
 
-In all cases, you can get further options with `duvidnn <command> --help`, for example:
+#### Dataset splitting (`eluent split`)
 
-```bash
-duvidnn train --help
+Partition a dataset into train / validation / test splits using one of three grouping methods.
+Groups are formed first, then packed into the requested split fractions using a bin-packing
+algorithm. Pass `--seed` for randomised packing; omit it for fully deterministic packing.
+
+```
+usage: eluent split [-h] [--type {random,scaffold,faiss}] [--n-neighbors N_NEIGHBORS]
+                    [--start START] [--end END] [--structure STRUCTURE]
+                    [--input-representation {smiles,selfies,inchi,aa_seq}]
+                    [--plot PLOT] [--plot-sample PLOT_SAMPLE] [--plot-seed PLOT_SEED]
+                    [--extras [EXTRAS ...]] [--seed SEED] [--cache CACHE]
+                    --output OUTPUT [--batch BATCH] [--kfolds KFOLDS]
+                    [--train TRAIN] [--validation VALIDATION] [--test TEST]
+                    input_file
+
+positional arguments:
+  input_file            Input file or hf:// URL.
+
+options:
+  --type {random,scaffold,faiss}
+                        Splitting method. Default: scaffold
+  --structure, -S       Column containing chemical structure strings.
+  --input-representation, -R {smiles,selfies,inchi,aa_seq}
+                        Structure string type. Default: smiles
+  --train               Fraction of examples for training. Required.
+  --validation          Fraction of examples for validation. Default: infer.
+  --test                Fraction of examples for test. Default: infer.
+  --kfolds, -K          Number of k-folds (overrides --validation). Default: 1
+  --seed, -i            Random seed. Omit for deterministic bin-packing.
+  --n-neighbors, -k     Nearest neighbours for FAISS grouping. Default: 10
+  --batch, -b           Batch size. Default: 16
+  --cache               Cache directory. Default: current directory.
+  --output, -o          Output filename. Required.
+  --plot                Filename for UMAP embedding plot.
+  --plot-sample, -n     Subsample size for UMAP. Default: 20000
+  --plot-seed, -e       Random seed for UMAP. Default: 42
+  --extras, -x          Extra columns to colour in the UMAP plot.
+  --start               First row to process. Default: 0
+  --end                 Last row to process. Default: end of dataset.
+  -h, --help            show this help message and exit
 ```
 
-### Annotating top percentiles
-
-You can add columns to datasets which annotate the top percentiles of named columns. This is compatible
-with extremely large datasets that don't fit in memory.
+**Random splitting** — each molecule is assigned to a group by hashing its row index.
+Groups are reproducible for the same `--seed`.
 
 ```bash
-$ duvidnn percentiles \
-    hf://scbirlab/fang-2023-biogen-adme@scaffold-split:train \
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type random \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --seed 42 \
+    --output split/random.csv \
+    --plot split/random-plot.png
+```
+
+**Scaffold splitting** — molecules are grouped by their Murcko scaffold, so structurally similar
+compounds always end up in the same split. This is the default and the recommended method for
+chemistry ML benchmarks.
+
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type scaffold \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --output split/scaffold.csv \
+    --plot split/scaffold-plot.png
+```
+
+**FAISS spectral splitting** — Morgan fingerprints are computed for each molecule, a k-NN graph
+is built using FAISS binary index (Hamming distance), and connected components of the graph become
+groups. This produces splits where molecules in each component are all more similar to each other
+than to molecules in other components.
+
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type faiss \
+    --structure smiles \
+    --n-neighbors 10 \
+    --train 0.7 \
+    --validation 0.15 \
+    --seed 42 \
+    --cache ./cache \
+    --output split/faiss.csv \
+    --plot split/faiss-plot.png
+```
+
+**k-fold cross-validation** — use `--kfolds` to generate multiple train/validation folds.
+The `--validation` fraction is split among folds; `--train` sets the remaining fraction.
+Output files are written to `fold_0/`, `fold_1/`, … sub-directories of the output path.
+
+```bash
+$ eluent split \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
+    --type scaffold \
+    --structure smiles \
+    --train 0.7 \
+    --validation 0.15 \
+    --kfolds 5 \
+    --seed 42 \
+    --output split/scaffold.csv
+```
+
+#### Percentile annotation (`eluent percentiles`)
+
+Add boolean columns to a dataset flagging which rows fall within the top-_k_ percentile of one
+or more numeric columns. Uses a T-Digest quantile sketch, so the full dataset never needs to be
+loaded into memory. A two-pass "definitely / maybe / definitely-not" strategy ensures exact counts.
+
+```
+usage: eluent percentiles [-h] [--columns [COLUMNS ...]] [--percentiles [PERCENTILES ...]]
+                           [--reverse] [--compression COMPRESSION] [--delta DELTA]
+                           [--start START] [--end END] [--cache CACHE] --output OUTPUT
+                           [--batch BATCH] [--plot PLOT] [--structure STRUCTURE]
+                           [--input-representation {smiles,selfies,inchi,aa_seq}]
+                           [--plot-sample PLOT_SAMPLE] [--plot-seed PLOT_SEED]
+                           [--extras [EXTRAS ...]]
+                           input_file
+
+positional arguments:
+  input_file            Input file or hf:// URL.
+
+options:
+  --columns, -c         Columns to tag. Required.
+  --percentiles, -p     Percentile thresholds. Default: 5
+  --reverse, -r         Tag bottom percentiles instead of top.
+  --compression, -z     T-Digest centroids (higher = more accurate). Default: 500
+  --delta, -d           Buffer width around percentile cutoff. Default: 1.0
+  --batch, -b           Batch size. Default: 16
+  --cache               Cache directory. Default: current directory.
+  --output, -o          Output filename. Required.
+  --plot                Filename for UMAP embedding plot.
+  --structure, -S       Structure column (required for --plot).
+  --input-representation, -R {smiles,selfies,inchi,aa_seq}
+                        Structure string type. Default: smiles
+  --plot-sample, -n     Subsample size for UMAP. Default: 20000
+  --plot-seed, -e       Random seed for UMAP. Default: 42
+  --extras, -x          Extra columns to colour in the UMAP plot.
+  --start               First row to process. Default: 0
+  --end                 Last row to process. Default: end of dataset.
+  -h, --help            show this help message and exit
+```
+
+Tag the top 1 %, 5 %, and 10 % of cLogP and TPSA values:
+
+```bash
+$ eluent percentiles \
+    hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train \
     --columns clogp tpsa \
     --percentiles 1 5 10 \
-    --output percentiles.parquet \
-    --plot percentiles-plot.png \
+    --batch 128 \
+    --cache ./cache \
+    --output percentiles/tagged.csv \
+    --plot percentiles/tagged-plot.png \
     --structure smiles
 ```
 
-In all cases, input data can be:
-- Path to a _local_ file in CSV, Parquet, Arrow or HF Dataset format
-- _or_ a remote dataset hosted on [🤗 Datasets](https://huggingface.co/datasets), 
-indicated by `hf://` followed by the repository name
+For each requested column and percentile, a new boolean column is added to the output dataset with
+the name `<column>_top_<percentile>_pc` (e.g. `clogp_top_5_pc`).
 
-### Data splitting
+### Python API
 
-There are utilities for out-of-memory scaffold and (approximate using FAISS) spectral splitting of datasets
-that don't fit in memory. Make it random but reproducible with `--seed`, otherwise a deterministic bin-packing
-algorithm is used.
+#### Splitting datasets
 
-```bash
-$ duvidnn split hf://scbirlab/fang-2023-biogen-adme@scaffold-split:train \
-    --train .7 \
-    --validation .15 \
-    --structure smiles \
-    --type faiss \
-    --seed 1 \
-    --output faiss.csv \
-    --plot faiss.png
-  ```
-
-### Model training and evaluation
-
-To train:
-
-```bash
-$ duvidnn train -1 hf://scbirlab/fang-2023-biogen-adme@scaffold-split:train \
-    -2 hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test \
-    --class fingerprint \
-    --structure smiles \
-    --ensemble-size 10 \
-    --epochs 10 \
-    --learning-rate 0.001 \
-    --output model.dv
-```
-
-Different model classes can be specified:
-
-
-### Hyperparameters
-
-There is also a simple hyperparameter utility.
-
-```bash
-$ printf '{"model_class": "fingerprint", use_2d": [true, false], "n_units": 16, "n_hidden": 3}' | duvidnn hyperprep -o hyperopt.json
-```
-
-This generates a file containing all combinations. It can be indexed (0-based) 
-with the `-i <int>` option to supply a specific training configuration like so:
-
-```bash
-$ duvidnn train \
-    -1 hf://scbirlab/fang-2023-biogen-adme@scaffold-split:train \
-    -2 hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test \
-    -c hyperopt.json \
-    -i 0 \
-    --output model.dv
-```
-
-In this way, you can generate all the hyperparameter combinations, then systematically test them one by one 
-(or in parallel using HPC or other methods).
-
-### Predictions
-
-You can make predictions on datasets using `duvidnn predict`. Optionally, you can restrict prediction to only a chunk of the
-dataset using `--start` and `--stop`. This can be useful to parallelize prediction across chunks.
-
-When predicting, there is also the option to calculate uncertainty metrics like ensemble variance (`--variance`), 
-Tanimoto nearest neighbor distance to training set (`--tanimoto`, for chemistry models), doubtscore (`--doubtscore`), 
-and information sensitivity (`--information-sensitivity`). 
-
-```bash
-$ duvidnn predict \
-    --test hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test \
-    --checkpoint model.dv \
-    --start 100 \
-    --end 200 \
-    --variance \
-    --tanimoto \
-    --doubtscore \
-    -y clogp \
-    --output predictions.parquet
-```
-
-Outputs can be made in CSV, Parquet, Arrow, or HF Dataset format. This is inferred from the file extension of
-the filename provided for `--output`. 
-
-Note that information sensitivity using default parameters can be very slow for large models with large
-training data, since it must calculate second-order parameter gradients for every training example. There are 
-approximations which can speed it up substantially, at the cost of exactness:
-- The `--last-layer` option gives the biggest speed-up, since it restricts the calculation to only the output layer of the model. 
-- Using `--optimality` assumes the model has been trained to an optimum (i.e. gradient of loss is zero). 
-- The `--approx bekas` option uses a fast approximation of second-order gradients.
-
-## Python API
-
-**duvidnn** provides python classes and functions for custom analysis.
-
-### Neural networks
-
-The core of **duvidnn** is the `ModelBox`, which is a container for a trainable model and its training data.
-These are connected because measures of confidence and information gain depend directly on the information
-or evidence already seen by the model.
-
-There are several `ModelBox` classes for specific deep learning architechtures in pytorch. 
+The high-level entry point is `split_dataset`, which accepts a 🤗 `Dataset` or `IterableDataset`
+and returns a `DatasetDict`:
 
 ```python
->>> from duvidnn.autoclass import MODELBOX_REGISTRY
->>> from pprint import pprint
->>> pprint(MODELBOX_REGISTRY)
-{'bilinear': <class 'duvidnn.torch.modelbox.modelboxes.TorchBilinearModelBox'>,
- 'bilinear-fp': <class 'duvidnn.torch.modelbox.modelboxes.TorchBilinearFingerprintModelBox'>,
- 'chemprop': <class 'duvidnn.torch.modelbox.modelboxes.ChempropModelBox'>,
- 'cnn': <class 'duvidnn.torch.modelbox.modelboxes.TorchCNN2DModelBox'>,
- 'fingerprint': <class 'duvidnn.torch.modelbox.modelboxes.TorchFingerprintModelBox'>,
- 'mlp': <class 'duvidnn.torch.modelbox.modelboxes.TorchMLPModelBox'>}
-```
+from datasets import load_dataset
+from eluent.utils.splitting import split_dataset
 
-The modelboxes `chemprop`, `fingerprint`, and `bilinear-fp` featurize SMILES representations of chemical 
-structures. The modelbox `mlp` is a general purpose multilayer perceptron.
+ds = load_dataset(
+    "scbirlab/fang-2023-biogen-adme",
+    "scaffold-split",
+    split="train",
+)
 
-You can set up your model with various training parameters.
-
-```python
-from duvidnn.autoclass import AutoClass
-modelbox = AutoClass(
-    "fingerprint",
-    n_units=16,
-    n_hidden=2,
-    ensemble_size=10,
+# Random split — 70 % train, 15 % validation, 15 % test
+split = split_dataset(
+    ds,
+    method="random",
     structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+    seed=42,
+)
+# split["train"], split["validation"], split["test"]
+```
+
+Pass `method="scaffold"` or `method="faiss"` for chemistry-aware grouping:
+
+```python
+# Scaffold split
+split = split_dataset(
+    ds,
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+)
+
+# FAISS spectral split
+split = split_dataset(
+    ds,
+    method="faiss",
+    structure_column="smiles",
+    n_neighbors=10,
+    train=0.7,
+    validation=0.15,
+    seed=42,
+    cache="./cache",
 )
 ```
 
-The internal neural network is instantiated on loading training data.
+For k-fold cross-validation, pass `kfolds > 1`. The function then returns a **tuple** of
+`DatasetDict`s, one per fold:
 
 ```python
-modelbox.load_training_data(
-    data="hf://scbirlab/fang-2023-biogen-adme@scaffold-split:train",
-    inputs="smiles", # column name of the predictor values
-    labels="clogp",  # column name of the values to predict
+folds = split_dataset(
+    ds,
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
+    kfolds=5,
 )
+for i, fold in enumerate(folds):
+    train_ds = fold["train"]
+    val_ds   = fold["validation"]
 ```
 
-The `data` can be a remote 🤗 dataset, in which case it is automatically downloaded. The `"@"`
-indicates the dataset configuration, and the `":"` indicates the specific data split.
-
-Alternatively, the training data can be a local CSV or TSV file, or in-memory Pandas dataframes 
-or dictionaries.
-
-With training data loaded, the model can be trained!
+For finer control, use the `SplitDataset` class directly:
 
 ```python
-modelbox.train(
-    val_filename="hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test",
-    epochs=10,
-    batch_size=128,
+from eluent.utils.splitting.splitter import SplitDataset
+
+sd = SplitDataset(ds)
+sd.group_and_split(
+    method="scaffold",
+    structure_column="smiles",
+    train=0.7,
+    validation=0.15,
 )
+result = sd.dataset  # DatasetDict
 ```
 
-The `ModelBox.train()` method uses pytorch Lightning under the hood, so other options such as callbacks
-for this framework should be accepted.
-
-#### Saving and sharing a trained model
-
-**duvidnn** provides a basic checkpointing mechanism to save model weights and training data to later reload.
+#### Annotating percentiles
 
 ```python
-modelbox.save_checkpoint("checkpoint.dv")
-modelbox.load_checkpoint("checkpoint.dv")
-```
+from datasets import load_dataset
+from eluent.utils.splitting.top_k import percentiles
 
-#### Evaluating and predicting on new data
-
-**duvidnn** `ModelBox`es provide methods for evaluating predictions on new data.
-
-```python
-predictions, metrics = modelbox.evaluate(
-    data="hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test",
+ds = load_dataset(
+    "scbirlab/fang-2023-biogen-adme",
+    "scaffold-split",
+    split="train",
+    streaming=True,
 )
-```
 
-#### Calculating uncertainty and information metrics
-
-**duvidnn** `ModelBox`es provide methods for calculating prediction variance of ensembles,
-doubtscore, and information sensitivity.
-
-```python
-doubtscore = modelbox.doubtscore(
-    data="hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test"
+tagged = percentiles(
+    ds=ds,
+    q={"clogp": [1, 5, 10], "tpsa": [5]},
+    compression=500,  # T-Digest centroids
+    delta=1.0,        # buffer width around cutoff
+    cache="./cache",
 )
-info_sens = modelbox.information_sensitivity(
-    data="hf://scbirlab/fang-2023-biogen-adme@scaffold-split:test",
-    approx="bekas",  # approximate Hessian diagonals
-    n=10,
-)
+# New columns: clogp_top_1_pc, clogp_top_5_pc, clogp_top_10_pc, tpsa_top_5_pc
 ```
-
-To avoid storing large datasets in memory, **duvidnn** uses [🤗 datasets](https://huggingface.co/docs/datasets/) under the hood
-to cache data. Results can be instantiated in memory with a little effort. For example:
-
-```python
-doubtscore = doubtscore.to_pandas()
-```
-
-See the [🤗 datasets documentation](https://huggingface.co/docs/datasets/) for more.
-
-## More advanced Python API: Implementing a new `ModelBox`
-
-Bringing a new pytorch model to **duvidnn** is relatively straightforward. First, write your model,
-adding Lighning logic and a `create_model()` method:
-
-```python
-from typing import Callable, Iterable, List, Mapping, Optional
-
-from torch.nn import BatchNorm1d, Dropout, Linear, Module, SiLU, Sequential
-from duvidnn.torch import TorchEnsembleMixin
-from duvidnn.torch.models.utils.lt import LightningMixin
-from torch import nn
-from torch.optim import Adam, Optimizer
-
-class SimpleMLP(nn.Module, LightningMixin):
-
-    def __init__(
-        self, 
-        n_input: int, 
-        n_units: int = 16, 
-        n_out: int = 1,
-        activation: Callable = nn.SiLU,  # Smooth activation to prevent vanishing gradient
-        learning_rate: float = .01,
-        optimizer: Optimizer = Adam,
-        *args, **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-        self.n_input = n_input
-        self.n_units = n_units
-        self.activation = activation
-        self.n_out = n_out
-        self.model_layers = nn.Sequential([
-            nn.Linear(self.n_input, self.n_units),
-            self.activation(),
-            nn.Linear(self.n_units, self.n_out),
-        ])
-        # Lightning logic
-        self._init_lightning(
-            optimizer=optimizer, 
-            learning_rate=learning_rate, 
-            model_attr='model_layers',  # the attribute containing the model
-        )
-
-    def forward(self, x):
-        return self.model_layers(x)
-```
-
-Then subclass `duvidnn.torch.modelbox.TorchModelBoxBase` and implement the `create_model()` method, which should
-simply return your instantiated model. If you want to preprocess input data on the fly, then
-add a `preprocess_data()` method which takes a data dictionary and returns a data dictionary.
-
-```python
-from typing import Dict
-
-from duvidnn.torch.modelbox import TorchModelBoxBase
-import numpy as np
-
-class MLPModelBox(TorchModelBoxBase):
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self._mlp_kwargs = kwargs
-
-    def create_model(self, *args, **kwargs):
-        self._model_config.update(kwargs)  # makes sure model checkpointing saves the keyword args
-        return SimpleMLP(
-            n_input=self.input_shape[-1],  # defined on data loading
-            n_out=self.output_shape[-1], 
-            *args, 
-            **self._model_config,
-            **self._mlp_kwargs,  # if init kwargs are relevant to model creation
-        )
-
-    # Define this method if your data needs preprocessing
-    @staticmethod
-    def preprocess_data(data: Dict[str, np.ndarray], _in_key, _out_key, **kwargs) -> Dict[str, np.ndarray]:
-        return {
-            _in_key: your_featurizer(data[_in_key]), 
-            _out_key: np.asarray(data[_out_key])
-        }
-```
-
-If you want to build `ModelBox`es based on a framework other than pytorch, you can subclass 
-the `duvidnn.base.ModelBoxBase` abstract class, making sure to implement its abstract methods.
 
 ## Issues, problems, suggestions
 
-Add to the [issue tracker](https://www.github.com/scbirlab/duvidnn/issues).
+Add to the [issue tracker](https://github.com/scbirlab/eluent/issues).
 
 ## Documentation
 
-(To come at [ReadTheDocs](https://duvidnn.readthedocs.org).)
+(To come at [ReadTheDocs](https://eluent.readthedocs.org).)
+
+## Roadmap
+
+The following features are planned for future releases:
+
+- **Additional grouping methods** — pharmacophore-based, reaction-centre-based, and
+  taxonomy-based grouping strategies, alongside the current random, scaffold, and FAISS methods.
+- **Additional FAISS featurizers** — plug-in support for alternative fingerprint types
+  (ECFP with configurable radius, MACCS keys, RDKit topological) and learned molecular
+  embeddings, so the k-NN graph can be built on richer similarity measures.
+- **Additional split strategies** — stratified splitting to preserve target-label class balance
+  across splits; time-based splits for temporal datasets.
+- **Multi-group / hierarchical splitting** — chain multiple grouping passes (e.g. scaffold
+  then random) to produce nested or combined splits in a single command.

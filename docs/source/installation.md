@@ -2,29 +2,49 @@
 
 ## The easy way
 
-Install the pre-compiled version from GitHub:
+Install the pre-compiled version from PyPI:
 
 ```bash
-$ pip install carabiner-tools
+$ pip install eluent
 ```
 
-If you want to use the `tensorflow`, `pandas`, or `matplotlib` utilities, these must be installed separately
-or together:
+### GPU acceleration
+
+For GPU-accelerated FAISS splitting (requires a CUDA-capable GPU):
 
 ```bash
-$ pip install carabiner-tools[deep]
-# or
-$ pip install carabiner-tools[pd]
-# or
-$ pip install carabiner-tools[mpl]
-# or
-$ pip install carabiner-tools[all]
+$ pip install eluent[splits_gpu]
 ```
+
+This replaces `faiss-cpu` with `faiss-gpu`.
 
 ## From source
 
-Clone the repository, then `cd` into it. Then run:
+Clone the repository, then `cd` into it and install in editable mode:
 
 ```bash
-pip install -e .
+$ git clone https://github.com/scbirlab/eluent.git
+$ cd eluent
+$ pip install -e .
 ```
+
+To also install development dependencies (pytest, flake8):
+
+```bash
+$ pip install -e ".[dev]"
+```
+
+## Requirements
+
+**eluent** requires Python ≥ 3.11 and depends on:
+
+| Package | Purpose |
+|---------|---------|
+| `datasets` ≥ 3.0 | Out-of-core dataset handling |
+| `faiss-cpu` ≥ 1.11 | k-NN graph for spectral splitting |
+| `schemist` ≥ 0.0.6 | Scaffold extraction and fingerprint computation |
+| `tdigest` ≥ 0.5 | Out-of-core quantile sketches |
+| `umap-learn` | UMAP visualisation of splits |
+| `carabiner-tools` ≥ 0.0.5.post3 | CLI utilities |
+| `numpy`, `scipy`, `tqdm` | Numerical utilities |
+| `huggingface_hub` | Remote dataset access |
