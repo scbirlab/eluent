@@ -1,37 +1,21 @@
 """Approximate percentiles out-of-core."""
 
-from typing import Dict, Iterable, Mapping, Union 
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Mapping, Union 
 
 from functools import partial
 
 from carabiner import print_err
-from datasets import Dataset, IterableDataset, concatenate_datasets
+if TYPE_CHECKING:
+    from datasets import Dataset, IterableDataset
+else:
+    Dataset, IterableDataset = Any, Any
 import numpy as np
 from tdigest import TDigest
 from tqdm.auto import tqdm
 
 from .utils import dataset_len
 from ..datasets import to_dataset
-
-def _tag_top(
-    x: Mapping[str, Iterable],
-    column: str,
-    cutoff: float,
-    output_column: str,
-    delta: float = .01,
-    reverse: bool = False
-) -> Dict[str, Iterable]:
-    out = []
-    sign = -1 if reverse else 1
-    for v in x[column]:
-        if v >= cutoff + delta:
-            out.append(sign)
-        elif v <= cutoff - delta:
-            out.append(-1 * sign)
-        else:
-            out.append(0)
-    x[output_column] = out
-    return x
+from .grouping import tag_top
     
 
 def get_percentile(
@@ -43,8 +27,9 @@ def get_percentile(
     reverse: bool = False,
     delta: float = 1.,
     batch_size: int = 1024,
-    cache: str = "./cache"
+    cache: str = "cache"
 ):
+    from datasets import Dataset, IterableDataset, concatenate_datasets
     if not reverse:
         cutoff = digest.percentile(100. - p)
     else:
@@ -58,12 +43,12 @@ def get_percentile(
     else:
         desc = {}
     ds = ds.map(
-        _tag_top,
+        tag_top,
         fn_kwargs={
-            "column": column,
+            "key": column,
             "cutoff": cutoff,
             "delta": delta,
-            "output_column": top_col,
+            "column": top_col,
             "reverse": reverse,
         },
         batched=True,
@@ -124,6 +109,7 @@ def percentiles(
     batch_size: int = 1024,
     cache: str = "./cache"
 ):
+    from datasets import Dataset, IterableDataset
     digests = {
         key: TDigest(K=compression) for key in q
     }

@@ -19,7 +19,7 @@ HF_HOME="$CACHE" eluent percentiles \
     --plot "$OUTPUT"/percentiles-plot.png \
     --structure smiles
 
-for type in faiss scaffold
+for type in random scaffold faiss
 do
     HF_HOME="$CACHE" eluent split \
         "$TRAIN" \

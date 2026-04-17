@@ -11,7 +11,7 @@ from .io import _resolve_and_slice_data, _save_dataset
 
 @clicommand("Splitting data with the following parameters")
 def _split(args: Namespace) -> None:
-
+    from datasets import concatenate_datasets
     from ..utils.splitting import split_dataset
     output = args.output
     out_dir = os.path.dirname(output)
@@ -33,7 +33,7 @@ def _split(args: Namespace) -> None:
         }
     else:
         faiss_opts = {}
-    ds, splits = split_dataset(
+    ds = split_dataset(
         ds=ds,
         method=args.type,
         structure_column=args.structure,
@@ -47,21 +47,24 @@ def _split(args: Namespace) -> None:
         **faiss_opts,
     )
     root, ext = os.path.splitext(output)
-    for key, split_ds in splits.items():
+    ds_together = []
+    for key, split_ds in ds.items():
         _save_dataset(
             split_ds, 
             f"{root}_{key}{ext}",
         )
+        ds_together.append(split_ds)
+    ds_together = concatenate_datasets(ds_together)
 
     if args.plot is not None:
 
         from carabiner.mpl import figsaver
         from ..utils.splitting.plot import plot_chemical_splits
 
-        print_err(f"Plotting splits...")
+        print_err(f"Plotting splits from {ds_together}")
         
         (fig, axes), df = plot_chemical_splits(
-            ds=ds,
+            ds=ds_together,
             structure_column=args.structure,
             input_representation=args.input_representation,
             split_columns="split",

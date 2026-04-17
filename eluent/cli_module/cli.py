@@ -78,7 +78,7 @@ def main() -> None:
         '--type', 
         type=str,
         default="scaffold",
-        choices=["scaffold", "faiss"],
+        choices=["random", "scaffold", "faiss"],
         help='Splitting method.',
     )
     random_seed = CLIOption(
