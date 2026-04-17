@@ -1,4 +1,4 @@
-eluent/utils/splitting/top_k.py"""Approximate percentiles out-of-core."""
+"""Approximate percentiles out-of-core."""
 
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Mapping, Union 
 
