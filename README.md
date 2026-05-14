@@ -4,6 +4,8 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/eluent)
 ![PyPI](https://img.shields.io/pypi/v/eluent)
 
+<img src="docs/source/_static/logo.svg" width="200">
+
 **eluent** is a Python library and command-line tool for chemistry-aware splitting of large datasets
 for machine learning. It provides three grouping strategies — random, Murcko scaffold, and approximate
 spectral clustering via FAISS — along with out-of-core percentile annotation. All operations work
