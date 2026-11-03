@@ -60,6 +60,7 @@ def _load_from_file(
             load_dataset,
             path="csv",
             data_files=filename,
+            split="train",
             cache_dir=datasets_cache,
             sep=sep,
         )
@@ -76,6 +77,7 @@ def _load_from_file(
             load_dataset,
             path=protocol,
             data_files=filename,
+            split="train",
             cache_dir=datasets_cache,
         )
         lock_key = "::".join([
@@ -155,7 +157,7 @@ def _load_from_dataframe(
             cache=datasets_cache,
         )
 
-    return ds["train"]
+    return ds
 
 
 def _get_ref_chunk(
@@ -227,6 +229,28 @@ class AutoDataset:
         data: str | DataFrame, 
         cache: str | None = None
     ) -> Union[Dataset, IterableDataset]:
+        """Load a dataset from a file, a DataFrame, or the Hugging Face Hub.
+
+        Examples
+        ========
+        >>> import os, tempfile
+        >>> import pandas as pd
+        >>> tmp = tempfile.mkdtemp()
+        >>> df = pd.DataFrame({"smiles": ["CCO", "CCN", "c1ccccc1"], "y": [1., 2., 3.]})
+        >>> df.to_csv(os.path.join(tmp, "data.csv"), index=False)
+        >>> df.to_parquet(os.path.join(tmp, "data.parquet"))
+        >>> for source in ("data.csv", "data.parquet"):
+        ...     ds = AutoDataset.load(os.path.join(tmp, source), cache=tmp)._dataset
+        ...     print(source, type(ds).__name__, ds.num_rows)
+        data.csv Dataset 3
+        data.parquet Dataset 3
+        >>> for _ in range(2):  # the second call reads the cached copy
+        ...     ds = AutoDataset.load(df, cache=tmp)._dataset
+        ...     print(type(ds).__name__, ds.num_rows)
+        Dataset 3
+        Dataset 3
+
+        """
 
         cache, _, _ = configure_hf_cache(cache)
 
