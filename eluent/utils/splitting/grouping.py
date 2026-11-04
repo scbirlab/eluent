@@ -167,28 +167,20 @@ def annotate_split(
 
 
     """
-    if isinstance(group_column, str):
-        group_column = (group_column,)
-    elif isinstance(group_column, (list, tuple)):
-        group_column = tuple(group_column)
+    columns = (group_column,) if isinstance(group_column, str) else tuple(group_column)
+    if not columns:
+        raise ValueError("Provide at least one grouping column.")
+
+    if len(columns) == 1:
+        keys = list(x[columns[0]])
     else:
-        raise ValueError(
-            "Group column must be iterable or string, "
-            f"but was {type(group_column)}: {group_column=}"
-        )
-    missing = [
-        k for g in group_column 
-        for k in x[g] 
-        if k not in key_to_split
-    ]
+        keys = list(zip(*(x[column] for column in columns), strict=True))
+
+    missing = set(keys).difference(key_to_split)
     if missing:
-        raise ValueError(
-            f"Groups not found in split mapping: {set(missing)}"
-        )
-    x[split_column] = [
-        key_to_split.get(k) 
-        for k in zip(x[g] for g in group_column)
-    ]
+        raise ValueError(f"Groups not found in split mapping: {missing}")
+
+    x[split_column] = [key_to_split[key] for key in keys]
     return x
 
 
@@ -199,22 +191,25 @@ def annotate_split_invert(
     *,
     cv_groups
 ) -> dict[str, ...]:
-    """Tag each entry with its split label.
+    """Annotate CV membership for each held-out fold combination.
+
+    Each holdout and ``cv_groups`` contain one set per grouping axis, in
+    ``group_column`` order. Rows outside the CV pool have all flags false.
 
     Examples
     ========
-    >>> allowed = {"fold1": {"A"}, "fold2": {"B"}}
-    >>> out = annotate_split_invert({"col": ["B", "A"]}, split_to_group=allowed, group_column="col", split_column="split")
-    >>> out["fold1|train"]
-    [False, True]
-    >>> out["fold1|validation"]
-    [True, False]
-    >>> allowed = {"fold1": {("A", "A")}, "fold2": {("A", "B")}}
-    >>> out = annotate_split_invert({"col": ["A", "A"], "col2": ["B", "A"]}, split_to_group=allowed, group_column=("col", "col2"), split_column="split")
-    >>> out["fold1|train"]
-    [False, True]
-    >>> out["fold1|validation"]
-    [True, False]
+    >>> batch = {"a": ["A1", "A0", "A0", "AT"], "b": ["B1", "B0", "B1", "B1"]}
+    >>> holdouts = {"fold0": ({"A0"}, {"B0"})}
+    >>> cv_groups = ({"A0", "A1"}, {"B0", "B1"})
+    >>> out = annotate_split_invert(
+    ...     batch, holdouts, ("a", "b"), cv_groups=cv_groups
+    ... )
+    >>> out["fold0|train"]
+    [True, False, False, False]
+    >>> out["fold0|validation"]
+    [False, True, False, False]
+    >>> out["fold0|validation_partial"]
+    [False, False, True, False]
 
     """
     if isinstance(group_column, str):
@@ -255,22 +250,18 @@ def annotate_split_invert_fixed(
     split_to_group: Mapping[str, Iterable[Iterable]],
     group_column: str | Iterable[str] = "group"
 ) -> dict[str, ...]:
-    """Tag each entry with its split label.
+    """Annotate fixed-split membership by requiring a match on every axis.
+
+    Each fixed split contains one set per grouping axis, in
+    ``group_column`` order.
 
     Examples
     ========
-    >>> allowed = {"fold1": {"A"}, "fold2": {"B"}}
-    >>> out = annotate_split_invert_fixed({"col": ["B", "A"]}, split_to_group=allowed, group_column="col", split_column="split")
-    >>> out["fold1|train"]
-    [False, True]
-    >>> out["fold1|validation"]
-    [True, False]
-    >>> allowed = {"fold1": {("A", "A")}, "fold2": {("A", "B")}}
-    >>> out = annotate_split_invert_fixed({"col": ["A", "A"], "col2": ["B", "A"]}, split_to_group=allowed, group_column=("col", "col2"), split_column="split")
-    >>> out["fold1|train"]
-    [False, True]
-    >>> out["fold1|validation"]
-    [True, False]
+    >>> batch = {"a": ["AT", "AT", "A1"], "b": ["BT", "B1", "BT"]}
+    >>> holdouts = {"test": ({"AT"}, {"BT"})}
+    >>> out = annotate_split_invert_fixed(batch, holdouts, ("a", "b"))
+    >>> out["test"]
+    [True, False, False]
 
     """
     if isinstance(group_column, str):
@@ -282,15 +273,7 @@ def annotate_split_invert_fixed(
             "Group column must be iterable or string, "
             f"but was {type(group_column)}: {group_column=}"
         )
-    missing = [
-        k for g in group_column 
-        for k in x[g] 
-        if k not in key_to_split
-    ]
-    if missing:
-        raise ValueError(
-            f"Groups not found in split mapping: {set(missing)}"
-        )
+
     x_transposed = list(zip(*(x[g] for g in group_column)))
     for col, holdouts in split_to_group.items():
         x[col] = [
