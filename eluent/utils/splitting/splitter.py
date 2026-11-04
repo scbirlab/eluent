@@ -144,9 +144,6 @@ class SplitDataset:
         for column in group_column:
             if column not in ds.column_names:
                 raise KeyError(f"Grouping column '{column}' is not in data: {ds.column_names}.")
-            
-            if column == split_column:
-                raise ValueError(f"Output split column name '{split_column}' must differ from grouping columns.")
         
         if not splits or any([
             any(not isfinite(v) or v < 0. for v in splits.values()),
