@@ -147,23 +147,154 @@ def _chemical_scaffold(
 
 
 def annotate_split(
-    x: Mapping[str, str], 
+    x: Mapping[str, ...], 
     key_to_split: Mapping[str, str],
-    group_column: str = "group",
-    column: str = "split"
-) -> Dict[str, ...]:
+    group_column: str | Iterable[str] = "group",
+    split_column: str = "split"
+) -> dict[str, ...]:
     """Tag each entry with its split label.
 
     Examples
     ========
     >>> comp_map = {"A": "train", "B": "test"}
-    >>> out = annotate_split({"col": ["B", "A"]}, key_to_split=comp_map, group_column="col", column="split")
+    >>> out = annotate_split({"col": ["B", "A"]}, key_to_split=comp_map, group_column="col", split_column="split")
+    >>> out["split"]
+    ['test', 'train']
+    >>> comp_map = {("A", "A"): "train", ("A", "B"): "test"}
+    >>> out = annotate_split({"col": ["A", "A"], "col2": ["B", "A"]}, key_to_split=comp_map, group_column=("col", "col2"), split_column="split")
     >>> out["split"]
     ['test', 'train']
 
+
     """
-    missing = [k for k in x[group_column] if k not in key_to_split]
+    if isinstance(group_column, str):
+        group_column = (group_column,)
+    elif isinstance(group_column, (list, tuple)):
+        group_column = tuple(group_column)
+    else:
+        raise ValueError(
+            "Group column must be iterable or string, "
+            f"but was {type(group_column)}: {group_column=}"
+        )
+    missing = [
+        k for g in group_column 
+        for k in x[g] 
+        if k not in key_to_split
+    ]
     if missing:
-        raise ValueError(f"Groups not found in split mapping: {set(missing)}")
-    x[column] = [key_to_split.get(k) for k in x[group_column]]
+        raise ValueError(
+            f"Groups not found in split mapping: {set(missing)}"
+        )
+    x[split_column] = [
+        key_to_split.get(k) 
+        for k in zip(x[g] for g in group_column)
+    ]
+    return x
+
+
+def annotate_split_invert(
+    x: Mapping[str, ...], 
+    split_to_group: Mapping[str, Iterable[Iterable]],
+    group_column: str | Iterable[str] = "group",
+    *,
+    cv_groups
+) -> dict[str, ...]:
+    """Tag each entry with its split label.
+
+    Examples
+    ========
+    >>> allowed = {"fold1": {"A"}, "fold2": {"B"}}
+    >>> out = annotate_split_invert({"col": ["B", "A"]}, split_to_group=allowed, group_column="col", split_column="split")
+    >>> out["fold1|train"]
+    [False, True]
+    >>> out["fold1|validation"]
+    [True, False]
+    >>> allowed = {"fold1": {("A", "A")}, "fold2": {("A", "B")}}
+    >>> out = annotate_split_invert({"col": ["A", "A"], "col2": ["B", "A"]}, split_to_group=allowed, group_column=("col", "col2"), split_column="split")
+    >>> out["fold1|train"]
+    [False, True]
+    >>> out["fold1|validation"]
+    [True, False]
+
+    """
+    if isinstance(group_column, str):
+        group_column = (group_column,)
+
+    rows = list(zip(*(x[column] for column in group_column)))
+    eligible = [
+        all(
+            value in allowed 
+            for value, allowed in zip(row, cv_groups)
+        )
+        for row in rows
+    ]
+
+    for fold_name, holdouts in split_to_group.items():
+        train = []
+        validation = []
+        validation_partial = []
+
+        for row, in_cv in zip(rows, eligible):
+            held = tuple(
+                value in holdout
+                for value, holdout in zip(row, holdouts)
+            )
+            train.append(in_cv and not any(held))
+            validation.append(in_cv and all(held))
+            validation_partial.append(in_cv and any(held) and not all(held))
+
+        x[f"{fold_name}|train"] = train
+        x[f"{fold_name}|validation"] = validation
+        x[f"{fold_name}|validation_partial"] = validation_partial
+
+    return x
+
+
+def annotate_split_invert_fixed(
+    x: Mapping[str, ...], 
+    split_to_group: Mapping[str, Iterable[Iterable]],
+    group_column: str | Iterable[str] = "group"
+) -> dict[str, ...]:
+    """Tag each entry with its split label.
+
+    Examples
+    ========
+    >>> allowed = {"fold1": {"A"}, "fold2": {"B"}}
+    >>> out = annotate_split_invert_fixed({"col": ["B", "A"]}, split_to_group=allowed, group_column="col", split_column="split")
+    >>> out["fold1|train"]
+    [False, True]
+    >>> out["fold1|validation"]
+    [True, False]
+    >>> allowed = {"fold1": {("A", "A")}, "fold2": {("A", "B")}}
+    >>> out = annotate_split_invert_fixed({"col": ["A", "A"], "col2": ["B", "A"]}, split_to_group=allowed, group_column=("col", "col2"), split_column="split")
+    >>> out["fold1|train"]
+    [False, True]
+    >>> out["fold1|validation"]
+    [True, False]
+
+    """
+    if isinstance(group_column, str):
+        group_column = (group_column,)
+    elif isinstance(group_column, (list, tuple)):
+        group_column = tuple(group_column)
+    else:
+        raise ValueError(
+            "Group column must be iterable or string, "
+            f"but was {type(group_column)}: {group_column=}"
+        )
+    missing = [
+        k for g in group_column 
+        for k in x[g] 
+        if k not in key_to_split
+    ]
+    if missing:
+        raise ValueError(
+            f"Groups not found in split mapping: {set(missing)}"
+        )
+    x_transposed = list(zip(*(x[g] for g in group_column)))
+    for col, holdouts in split_to_group.items():
+        x[col] = [
+            all(d in h for d, h in zip(row, holdouts))
+            for row in x_transposed
+        ]
     return x
