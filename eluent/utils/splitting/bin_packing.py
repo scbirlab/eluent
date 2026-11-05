@@ -44,6 +44,23 @@ def random_packing_step(
     group_to_split: Mapping[str, str],
     rng
 ):
+    """Choose a fitting bin by weight, or use the bin with most space.
+
+    Examples
+    ========
+    When neither bin can fit a 100-row group, place it in the bin with
+    the most space. An overfilled bin must not contribute a negative weight.
+
+    >>> remaining = {"fold0": -33, "fold1": 67}
+    >>> assignments, remaining = random_packing_step(
+    ...     100, "scaffold_A", remaining, {}, np.random.default_rng(42)
+    ... )
+    >>> assignments
+    {'scaffold_A': 'fold1'}
+    >>> remaining
+    {'fold0': -33, 'fold1': -33}
+    
+    """
     eligible = [
         split_name for split_name, capacity in remaining.items() 
         if capacity >= group_size
