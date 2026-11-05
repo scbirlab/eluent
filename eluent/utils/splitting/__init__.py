@@ -1,6 +1,7 @@
 """Split datasets."""
 
-from typing import TYPE_CHECKING, Any, Mapping, Iterable, Union
+from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping, Iterable
 
 if TYPE_CHECKING:
     from datasets import Dataset, DatasetDict, IterableDataset
@@ -10,8 +11,8 @@ else:
 from .splitter import SplitDataset
 
 def split_dataset(
-    ds: Union[Dataset, IterableDataset],
-    method: Union[str, Mapping, Iterable],
+    ds: Dataset | IterableDataset,
+    method: str | Mapping | Iterable,
     *args, **kwargs
 ) -> DatasetDict:  
     ds = SplitDataset(ds)

@@ -40,8 +40,10 @@ def process_splits(fn: Callable):
         **kwargs
     ) -> Callable:
         if kfolds == 1:
-            validation = validation or (1. - train)
-            test = test or (1. - train - validation)
+            if validation is None:
+                validation = round(1. - train - (test or 0.), 6)
+            if test is None:
+                test = round(1. - train - validation, 6)
             _splits = {
                 "train": train,
             }
@@ -51,7 +53,8 @@ def process_splits(fn: Callable):
                 _splits["test"] = test
         else:
             print_err(f"{kfolds=}, so ignoring {validation=}")
-            test = test or (1. - train)
+            if test is None:
+                test = 1. - train
             _splits = {
                 f"train:fold={i}": train / kfolds
                 for i in range(kfolds)

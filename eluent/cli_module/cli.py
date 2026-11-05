@@ -81,6 +81,12 @@ def main() -> None:
         choices=["random", "scaffold", "faiss"],
         help='Splitting method.',
     )
+    group_columns = CLIOption(
+        '--group-columns',
+        nargs='+',
+        default=None,
+        help='Existing group columns, in axis order. Overrides --type.',
+    )
     random_seed = CLIOption(
         '--seed', '-i', 
         type=int,
@@ -170,6 +176,7 @@ def main() -> None:
         options=[
             input_filename, 
             split_type,
+            group_columns,
             n_neighbors,
             slice_start,
             slice_end,

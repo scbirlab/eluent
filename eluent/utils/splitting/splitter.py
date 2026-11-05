@@ -123,6 +123,7 @@ class SplitDataset:
         self,
         key: str = "train",
         group_column: Iterable[str] = "group",
+        split_column: None = None,
         deterministic: bool = True,
         seed: int = DEFAULT_SEED,
         batch_size: int = DEFAULT_BATCH_SIZE,
@@ -341,25 +342,26 @@ class SplitDataset:
     @process_splits
     def group_and_split(
         self,
-        method: Union[str, Callable],
+        method: str | Callable | None = None,
         key: str = "train",
-        group_column: str = "group",
+        group_column: str | Iterable[str] = "group",
         split_column: str = "split",
         deterministic: bool = True,
         seed: int = DEFAULT_SEED,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        splits: Optional[Mapping[str, float]] = None,
-        preprocess: Optional[Callable] = None,
+        splits: Mapping[str, float] | None = None,
+        preprocess: Callable | None = None,
         **kwargs
     ):
-        self.dataset = self.group(
-            key=key,
-            group_column=group_column,
-            method=method,
-            batch_size=batch_size,
-            preprocess=preprocess,
-            **kwargs,
-        )
+        if method is not None:
+            self.dataset = self.group(
+                key=key,
+                group_column=group_column,
+                method=method,
+                batch_size=batch_size,
+                preprocess=preprocess,
+                **kwargs,
+            )
         dataset = self.split(
             key=key,
             group_column=group_column,
