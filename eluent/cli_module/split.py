@@ -60,7 +60,7 @@ def _split(args: Namespace) -> None:
         kfolds=args.kfolds,
         batch_size=args.batch,
         seed=42 if args.seed is None else args.seed,
-        deterministic=args.seed is not None,
+        deterministic=args.seed is None,
         **faiss_opts,
     )
     if isinstance(ds, DatasetDict):

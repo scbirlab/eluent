@@ -72,8 +72,8 @@ def get_percentile(
         desc = {"desc": "Tagging borderline"}
     else:
         desc = {}
-    to_dataset_p = partial(to_dataset, cache=cache)
-    maybes = to_dataset_p(ds_tfm[0]).sort(column, reverse=reverse)
+    to_dataset_p = partial(to_dataset, batch_size=batch_size, cache=cache)
+    maybes = to_dataset_p(ds_tfm[0], nrows=dataset_len(ds_tfm[0])).sort(column, reverse=not reverse)
 
     print_err(f"Confidently tagged {n_definitely_true} {column=}, {p=}; need {n_required_from_maybe} / {maybes.num_rows} to make {k} total.")
     maybes_to_true = maybes.take(n_required_from_maybe).map(lambda x: {top_col: 1}, desc="Tagging maybes as True")
@@ -109,6 +109,29 @@ def percentiles(
     batch_size: int = 1024,
     cache: str | None = None
 ):
+    """Tag rows in the top (or bottom) percentiles of columns, out-of-core.
+
+    Examples
+    ========
+    >>> import numpy as np
+    >>> from datasets import Dataset
+    >>> x = np.random.default_rng(0).normal(size=3000)
+    >>> ds = Dataset.from_dict({"x": x})
+    >>> out = percentiles(ds, q={"x": [5]}, delta=1.)
+    >>> tagged = np.array(out["x"])[np.array(out["x_top_5_pc"], dtype=bool)]
+    >>> len(tagged)
+    150
+    >>> bool((tagged >= np.quantile(x, .95)).all())
+    True
+    >>> out = percentiles(ds, q={"x": [5]}, delta=1., reverse=True)
+    >>> tagged = np.array(out["x"])[np.array(out["x_top_5_pc"], dtype=bool)]
+    >>> len(tagged)
+    150
+    >>> bool((tagged <= np.quantile(x, .05)).all())
+    True
+
+    """
+    
     from datasets import Dataset, IterableDataset
     digests = {
         key: TDigest(K=compression) for key in q

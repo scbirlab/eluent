@@ -26,6 +26,15 @@ def process_splits(fn: Callable):
     True
     >>> abs(result['train:fold=0'] - 0.2) < 1e-9
     True
+    >>> sorted(_echo(train=0.8, test=0.2))  # no validation was asked for
+    ['test', 'train']
+    >>> sorted(_echo(train=0.7, test=0.3))  # 1 - 0.7 - 0.3 is not exactly 0 in floating point
+    ['test', 'train']
+    >>> sorted(_echo(train=0.8, validation=0.))  # validation=0 means no validation
+    ['test', 'train']
+    >>> result = _echo(train=0.7, test=0.2)
+    >>> abs(result['validation'] - 0.1) < 1e-9
+    True
 
     """
 
