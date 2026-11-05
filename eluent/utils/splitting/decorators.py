@@ -62,7 +62,8 @@ def process_splits(fn: Callable):
                 _splits["test"] = test
         else:
             print_err(f"{kfolds=}, so ignoring {validation=}")
-            test = test or (1. - train)
+            if test is None:
+                test = 1. - train
             _splits = {
                 f"train:fold={i}": train / kfolds
                 for i in range(kfolds)

@@ -1,6 +1,6 @@
 """Utilities used in splitting."""
 
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Union
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from datasets import Dataset, IterableDataset
@@ -11,7 +11,7 @@ from carabiner import print_err
 from tqdm.auto import tqdm
 
 
-def dataset_len(ds: Union[Dataset, IterableDataset]):
+def dataset_len(ds: Dataset | IterableDataset) -> int:
     from datasets import Dataset, IterableDataset
     if isinstance(ds, Dataset):
         return ds.num_rows
