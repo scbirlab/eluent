@@ -132,6 +132,15 @@ def _chemical_scaffold(
 ):
     """Annotate a chemical structure with its scaffold.
 
+    Ring-less molecules have no Murcko scaffold, so each one is
+    grouped by its canonical SMILES instead.
+
+    Examples
+    ========
+    >>> x = {"smiles": ["CCO", "OCC", "c1ccccc1O"]}
+    >>> _chemical_scaffold(x, indices=[0, 1, 2], structure_column="smiles")["group"]
+    ['CCO', 'CCO', 'c1ccccc1']
+
     """
 
     converted = convert_string_representation(
@@ -143,7 +152,18 @@ def _chemical_scaffold(
         converted = list(converted)
     else:
         converted = [converted]
-    return converted
+    # Ring-less molecules have no Murcko scaffold (""), so they would all share one group.
+    # Use each one's canonical SMILES instead, so only identical molecules share a group.
+    structures = [x[structure_column]] if isinstance(x[structure_column], str) else list(x[structure_column])
+    return [
+        convert_string_representation(
+            strings=structure,
+            input_representation=input_representation,
+            output_representation="smiles",
+        )
+        if scaffold == "" else scaffold
+        for structure, scaffold in zip(structures, converted)
+    ]
 
 
 def annotate_split(
