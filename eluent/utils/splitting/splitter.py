@@ -268,6 +268,136 @@ class SplitDataset:
         on every axis. 
         Fractions apply per axis, before intersection.
 
+        Examples
+        ========
+        Construct every combination of four groups on three axes.
+
+        >>> from itertools import combinations, product
+        >>> axes = ("scaffold", "taxon", "target")
+        >>> rows = list(product(range(4), repeat=3))
+        >>> data = Dataset.from_dict({
+        ...     "id": list(range(len(rows))),
+        ...     **{
+        ...         axis: [row[i] for row in rows]
+        ...         for i, axis in enumerate(axes)
+        ...     },
+        ... })
+
+        Ordinary splits retain intersections and exclude mixed assignments.
+
+        >>> parts = SplitDataset(data).split(
+        ...     group_column=axes,
+        ...     splits={"train": 0.5, "test": 0.5},
+        ... )
+        >>> sorted(parts)
+        ['test', 'train']
+        >>> len(parts["train"]), len(parts["test"])
+        (8, 8)
+        >>> all(
+        ...     set(parts["train"][axis]).isdisjoint(parts["test"][axis])
+        ...     for axis in axes
+        ... )
+        True
+
+        Three CV folds across three axes produce 27 evaluations.
+
+        >>> folds = SplitDataset(data).split(
+        ...     group_column=axes,
+        ...     splits={
+        ...         "train:fold=0": 0.25,
+        ...         "train:fold=1": 0.25,
+        ...         "train:fold=2": 0.25,
+        ...         "test": 0.25,
+        ...     },
+        ... )
+        >>> len(folds)
+        27
+        >>> all(
+        ...     set(fold) == {"train", "validation", "validation_partial", "test"}
+        ...     for fold in folds
+        ... )
+        True
+
+        The Cartesian fixture populates every returned partition.
+
+        >>> all(
+        ...     (
+        ...         len(fold["train"]),
+        ...         len(fold["validation"]),
+        ...         len(fold["validation_partial"]),
+        ...         len(fold["test"]),
+        ...     ) == (8, 1, 18, 1)
+        ...     for fold in folds
+        ... )
+        True
+
+        Full train, validation and test partitions exclude groups on every axis.
+
+        >>> all(
+        ...     set(fold[left][axis]).isdisjoint(fold[right][axis])
+        ...     for fold in folds
+        ...     for left, right in combinations(("train", "validation", "test"), 2)
+        ...     for axis in axes
+        ... )
+        True
+
+        Fixed-test groups are excluded from partial validation as well.
+
+        >>> all(
+        ...     set(fold["test"][axis]).isdisjoint(fold["validation_partial"][axis])
+        ...     for fold in folds
+        ...     for axis in axes
+        ... )
+        True
+
+        All returned partitions are disjoint by observation.
+
+        >>> all(
+        ...     set(fold[left]["id"]).isdisjoint(fold[right]["id"])
+        ...     for fold in folds
+        ...     for left, right in combinations(fold, 2)
+        ... )
+        True
+
+        The fixed test set stays identical across evaluations.
+
+        >>> all(
+        ...     set(fold["test"]["id"]) == set(folds[0]["test"]["id"])
+        ...     for fold in folds
+        ... )
+        True
+
+        Every CV-eligible observation receives full validation exactly once.
+
+        >>> from collections import Counter
+        >>> validation_counts = Counter(
+        ...     row_id
+        ...     for fold in folds
+        ...     for row_id in fold["validation"]["id"]
+        ... )
+        >>> len(validation_counts), set(validation_counts.values())
+        (27, {1})
+
+        Unrelated DatasetDict entries pass through.
+
+        >>> source = DatasetDict({"train": data, "external": data.select([0])})
+        >>> parts = SplitDataset(source).split(
+        ...     group_column=axes,
+        ...     splits={"train": 0.5, "test": 0.5},
+        ... )
+        >>> list(parts["external"]["id"])
+        [0]
+
+        Duplicate grouping axes are rejected.
+
+        >>> SplitDataset(data).split(
+        ...     group_column=("scaffold", "scaffold"),
+        ...     splits={"train": 0.5, "test": 0.5},
+        ... )
+        Traceback (most recent call last):
+            ...
+        ValueError: Provide distinct grouping columns.
+
         """
         ds = self.dataset[key]
         if not isinstance(group_column, str):
@@ -353,6 +483,106 @@ class SplitDataset:
         preprocess: Callable | None = None,
         **kwargs
     ):
+        """Annotate groups when requested, split the data, and return self.
+
+        Examples
+        ========
+        Construct every combination of four groups on three axes.
+
+        >>> from itertools import product
+        >>> axes = ("scaffold", "taxon", "target")
+        >>> rows = list(product(range(4), repeat=3))
+        >>> data = Dataset.from_dict({
+        ...     "id": list(range(len(rows))),
+        ...     **{
+        ...         axis: [row[i] for row in rows]
+        ...         for i, axis in enumerate(axes)
+        ...     },
+        ... })
+
+        Existing grouping columns can be split without generating new labels.
+        Explicit test fractions leave no inferred validation partition.
+
+        >>> splitter = SplitDataset(data)
+        >>> result = splitter.group_and_split(
+        ...     method=None,
+        ...     group_column=axes,
+        ...     train=0.5,
+        ...     test=0.5,
+        ... )
+        >>> result is splitter
+        True
+        >>> sorted(result.dataset)
+        ['test', 'train']
+        >>> len(result.dataset["train"]), len(result.dataset["test"])
+        (8, 8)
+        >>> all(
+        ...     set(result.dataset["train"][axis]).isdisjoint(
+        ...         result.dataset["test"][axis]
+        ...     )
+        ...     for axis in axes
+        ... )
+        True
+
+        Without a test fraction, the remainder becomes validation.
+
+        >>> result = SplitDataset(data).group_and_split(
+        ...     method=None,
+        ...     group_column=axes,
+        ...     train=0.5,
+        ... )
+        >>> sorted(result.dataset)
+        ['train', 'validation']
+        >>> len(result.dataset["train"]), len(result.dataset["validation"])
+        (8, 8)
+
+        Three folds on each of three axes produce 27 evaluations.
+        The remaining quarter of each axis is reserved for fixed test.
+
+        >>> result = SplitDataset(data).group_and_split(
+        ...     method=None,
+        ...     group_column=axes,
+        ...     train=0.75,
+        ...     test=0.25,
+        ...     kfolds=3,
+        ... )
+        >>> isinstance(result.dataset, tuple), len(result.dataset)
+        (True, 27)
+        >>> all(
+        ...     set(fold) == {"train", "validation", "validation_partial", "test"}
+        ...     for fold in result.dataset
+        ... )
+        True
+        >>> all(
+        ...     (
+        ...         len(fold["train"]),
+        ...         len(fold["validation"]),
+        ...         len(fold["validation_partial"]),
+        ...         len(fold["test"]),
+        ...     ) == (8, 1, 18, 1)
+        ...     for fold in result.dataset
+        ... )
+        True
+
+        Generating groups and then splitting still works for a single axis.
+
+        >>> result = SplitDataset(data).group_and_split(
+        ...     method="random",
+        ...     train=0.5,
+        ...     test=0.5,
+        ...     seed=42,
+        ... )
+        >>> sorted(result.dataset)
+        ['test', 'train']
+        >>> all("group" in part.column_names for part in result.dataset.values())
+        True
+        >>> train_ids = set(result.dataset["train"]["id"])
+        >>> test_ids = set(result.dataset["test"]["id"])
+        >>> train_ids.isdisjoint(test_ids)
+        True
+        >>> train_ids | test_ids == set(data["id"])
+        True
+        """
         if method is not None:
             self.dataset = self.group(
                 key=key,

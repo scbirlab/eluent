@@ -1,6 +1,6 @@
-"""Generating splits on chemical scaffold."""
+"""Generating split groups."""
 
-from typing import Callable, Dict, Iterable, Optional, Mapping, Union
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial, wraps
 import hashlib
 import struct
@@ -14,7 +14,7 @@ from schemist.features import calculate_feature
 from .bin_packing import pack_bins
 from .decorators import process_splits
 
-GROUPING_FUNCTIONS: Dict[str, Callable] = {}
+GROUPING_FUNCTIONS: dict[str, Callable] = {}
 
 
 @decorator_with_params
@@ -34,7 +34,7 @@ def _assign_and_return(
         *args,
         column: str = "group",
         **kwargs
-    ) -> Dict[str, ...]:
+    ) -> dict[str, ...]:
         values = fn(x, *args, **kwargs)
         x[column] = values
         return x
@@ -48,7 +48,7 @@ def tag_top(
     cutoff: float,
     delta: float = .01,
     reverse: bool = False
-) -> Dict[str, Iterable]:
+) -> dict[str, Iterable]:
     out = []
     sign = -1 if reverse else 1
     for v in x[key]:
@@ -198,18 +198,42 @@ def annotate_split_invert(
 
     Examples
     ========
-    >>> batch = {"a": ["A1", "A0", "A0", "AT"], "b": ["B1", "B0", "B1", "B1"]}
+        Examples
+    ========
+    Each tuple contains one group set per axis.
+
+    >>> batch = {
+    ...     "a": ["A1", "A0", "A0", "AT", "AT"],
+    ...     "b": ["B1", "B0", "B1", "B1", "BT"],
+    ... }
     >>> holdouts = {"fold0": ({"A0"}, {"B0"})}
-    >>> cv_groups = ({"A0", "A1"}, {"B0", "B1"})
     >>> out = annotate_split_invert(
-    ...     batch, holdouts, ("a", "b"), cv_groups=cv_groups
+    ...     batch,
+    ...     split_to_group=holdouts,
+    ...     group_column=("a", "b"),
+    ...     cv_groups=({"A0", "A1"}, {"B0", "B1"}),
     ... )
     >>> out["fold0|train"]
-    [True, False, False, False]
+    [True, False, False, False, False]
     >>> out["fold0|validation"]
-    [False, True, False, False]
+    [False, True, False, False, False]
     >>> out["fold0|validation_partial"]
-    [False, False, True, False]
+    [False, False, True, False, False]
+
+    Single-axis splitting has no partial holdouts.
+
+    >>> out = annotate_split_invert(
+    ...     {"a": ["A0", "A1", "AT"]},
+    ...     split_to_group={"fold0": ({"A0"},)},
+    ...     group_column="a",
+    ...     cv_groups=({"A0", "A1"},),
+    ... )
+    >>> out["fold0|train"]
+    [False, True, False]
+    >>> out["fold0|validation"]
+    [True, False, False]
+    >>> out["fold0|validation_partial"]
+    [False, False, False]
 
     """
     if isinstance(group_column, str):
@@ -257,11 +281,25 @@ def annotate_split_invert_fixed(
 
     Examples
     ========
-    >>> batch = {"a": ["AT", "AT", "A1"], "b": ["BT", "B1", "BT"]}
-    >>> holdouts = {"test": ({"AT"}, {"BT"})}
-    >>> out = annotate_split_invert_fixed(batch, holdouts, ("a", "b"))
+    Fixed splits require membership on every axis.
+
+    >>> out = annotate_split_invert_fixed(
+    ...     {"a": ["AT", "AT", "A1", "A1"], "b": ["BT", "B1", "BT", "B1"]},
+    ...     split_to_group={"test": ({"AT"}, {"BT"})},
+    ...     group_column=("a", "b"),
+    ... )
     >>> out["test"]
-    [True, False, False]
+    [True, False, False, False]
+
+    Single-axis fixed splits use a tuple containing one set.
+
+    >>> out = annotate_split_invert_fixed(
+    ...     {"a": ["AT", "A1"]},
+    ...     split_to_group={"test": ({"AT"},)},
+    ...     group_column="a",
+    ... )
+    >>> out["test"]
+    [True, False]
 
     """
     if isinstance(group_column, str):
