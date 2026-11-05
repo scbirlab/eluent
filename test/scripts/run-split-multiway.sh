@@ -17,7 +17,8 @@ with open(sys.argv[1], "w", newline="") as handle:
         writer.writerow([row_id, *groups])
 PY
 
-for folds in 1 3; do
+for folds in 1 3
+do
     eluent split "$work_dir/input.csv" \
         --group-columns scaffold taxon target \
         --train 0.8 \
