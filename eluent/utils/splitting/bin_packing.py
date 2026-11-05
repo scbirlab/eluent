@@ -1,7 +1,6 @@
 """Algorithm for packing groups into splits."""
 
-from typing import Dict, Mapping, Optional, Tuple, Union
-
+from collections.abc import Mapping
 from collections import Counter
 
 from carabiner import print_err
@@ -17,7 +16,7 @@ def deterministic_packing_step(
     remaining: Mapping[str, int],
     group_to_split: Mapping[str, str],
     **kwargs
-) -> Tuple[Dict]:
+) -> tuple[dict]:
     """Core step of bin backing.
 
     Puts item into the bin with most remaining space.
@@ -50,8 +49,10 @@ def random_packing_step(
         if capacity >= group_size
     ]
     if len(eligible) == 0:
-        # if none can fully fit, fall back to all splits (you may accept overflow)
-        eligible = list(remaining)
+        # Groups are indivisible, so overflow into the bin with most space.
+        return deterministic_packing_step(
+            group_size, group_name, remaining, group_to_split
+        )
 
     weights = np.array(
         [remaining[name] for name in eligible], 
@@ -66,14 +67,14 @@ def random_packing_step(
 
 
 def pack_bins(
-    ds: Union[Dataset, IterableDataset],
+    ds: Dataset | IterableDataset,
     group_column: str,
     splits: Mapping[str, float],
     batch_size: int = 1024,
-    num_rows: Optional[int] = None,
+    num_rows: int | None = None,
     deterministic: bool = True,
     seed: int = 42
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Pack a Dataset into defined bins/splits.
 
     Examples
