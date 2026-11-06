@@ -76,8 +76,8 @@ def _partition_by_bool_column(
 @dataclass(frozen=True)
 class SplitInfo:
     key: str
-    counts: Mapping[str, int]
-    fractions: Mapping[str, float]
+    counts: Mapping[str, Mapping[str, int]]
+    fractions: Mapping[str, Mapping[str, float]]
     partition_columns: tuple[str]
     fixed_columns: tuple[str]
     fold_columns: tuple[str]
@@ -174,6 +174,7 @@ class SplitDataset:
     ):
         from datasets import Dataset, DatasetDict, IterableDataset
         path = Path(path)
+        format = format.lstrip(".")
         ds = self.split_dataset
         if isinstance(ds, DatasetDict):
             ds = {"fold_x": ds}
@@ -239,8 +240,12 @@ class SplitDataset:
             obj.dataset[info.key],
             partition_table,
         ], axis=1)
+        obj.dataset = DatasetDict({
+            **obj.dataset,
+            info.key: ds,
+        })
         split_dataset = _partition_by_bool_column(
-            DatasetDict({**obj.dataset, info.key: ds}),
+            obj.dataset,
             fixed_columns=info.fixed_columns,
             fold_columns=info.fold_columns,
             key=info.key,
@@ -465,7 +470,7 @@ class SplitDataset:
         batch_size: int = DEFAULT_BATCH_SIZE,
         splits: Mapping[str, float] | None = None,
         **kwargs
-    ) -> DatasetDict | tuple[DatasetDict, ...]:
+    ) -> tuple[Dataset, Mapping, SplitInfo]:
 
         """Split a dataset based on grouping.
 
@@ -782,6 +787,7 @@ class SplitDataset:
         True
         
         """
+        from datasets import DatasetDict
         if method is not None:
             self.dataset = self.group(
                 key=key,
