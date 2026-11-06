@@ -16,8 +16,6 @@ else:
 import numpy as np
 from tqdm.auto import tqdm
 
-from .package_data import configure_hf_cache
-
 
 def _iter_dataset(ds):
     yield from ds
@@ -39,6 +37,7 @@ def to_dataset(
     True
 
     """
+    from providence.package_data import configure_hf_cache
 
     _, datasets_cache, _ = configure_hf_cache(cache)
 
