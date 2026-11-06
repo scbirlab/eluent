@@ -1,40 +1,33 @@
-from typing import Mapping, Optional, Union
-
 from argparse import Namespace
 import os
+from pathlib import Path
 
 from carabiner import pprint_dict, print_err
 from carabiner.cliutils import clicommand
 
-from .io import _resolve_and_slice_data, _save_dataset
-from ..utils.package_data import configure_hf_cache
+from .io import _save_dataset
 
 
 @clicommand("Splitting data with the following parameters")
 def _split(args: Namespace) -> None:
+
+    from providence import DataResolver
+    from providence.package_data import configure_hf_cache
 
     cache, _, _ = configure_hf_cache(args.cache)
 
     from datasets import concatenate_datasets, DatasetDict
 
     from ..utils.splitting import split_dataset
-    from ..utils.splitting.utils import dataset_len
-    output = args.output
-    out_dir = os.path.dirname(output)
-    base = os.path.basename(output)
-    root, ext = os.path.splitext(base)
-    if len(out_dir) > 0:
-        os.makedirs(out_dir, exist_ok=True)
-    
+
     if args.train is None:
         raise ValueError(f"You need to at least provide a --train fraction.")
     
-    ds = _resolve_and_slice_data(
-        args.input_file,
-        start=args.start,
-        end=args.end,
-        cache=cache,
+    resolved = (
+        DataResolver(args.input_file, cache_dir=cache)
+        .select_rows(args.start, args.end)
     )
+
     group_columns = args.group_columns
     if group_columns is not None:
         group_column = group_columns[0] if len(group_columns) == 1 else group_columns
@@ -49,7 +42,7 @@ def _split(args: Namespace) -> None:
         }
 
     ds = split_dataset(
-        ds=ds,
+        ds=resolved,
         method=None if group_columns else args.type,
         group_column=group_column,
         structure_column=args.structure,
@@ -63,66 +56,155 @@ def _split(args: Namespace) -> None:
         deterministic=args.seed is None,
         **faiss_opts,
     )
-    if isinstance(ds, DatasetDict):
-        ds = (ds,)
-    print_err(f"[INFO] Generated {len(ds)} folds")
-    ds_together = []
-    for i, fold in enumerate(ds):
-        row_counts, total_rows = {}, 0
-        _ds_together = []
-        for key, split_ds in fold.items():
-            split_nrows = dataset_len(split_ds)
-            row_counts[key] = split_nrows
-            total_rows += split_nrows
-            this_filename = os.path.join(out_dir, f"fold_{i}", f"{root}_{key}{ext}")
-            os.makedirs(os.path.dirname(this_filename), exist_ok=True)
-            _save_dataset(
-                split_ds, 
-                this_filename,
-            )
-            if args.plot is not None and split_nrows > 0:
-                if group_columns and len(group_columns) > 1:
-                    if "split" in split_ds.column_names:
-                        split_ds = split_ds.remove_columns("split")
-                    split_ds = split_ds.add_column("split", [key] * split_nrows)
-                _ds_together.append(split_ds)
-        split_fractions = {
-            key: count / total_rows if total_rows else 0.0
-            for key, count in row_counts.items()
-        }
-        pprint_dict(split_fractions, message=f"Split fractions, fold {i + 1}")
-        if args.plot is not None:
-            ds_together.append(
-                concatenate_datasets(_ds_together) 
-                if len(_ds_together) > 0
-                else None
-            )
 
-    if args.plot is not None:
-        from carabiner.mpl import figsaver
-        from ..utils.splitting.plot import plot_chemical_splits
+    if args.output is None and args.checkpoint is None:
+        raise ValueError("At least one of --output and --checkpoint should be provided.")
+    
+    if args.output is not None and isinstance(args.output, str):
+        output = args.output
+        out_dir = os.path.dirname(output)
+        base = os.path.basename(output)
+        root, ext = os.path.splitext(base)
+        ds.write_tables(
+            Path(out_dir) / root,
+            format=ext,
+        )
+        pprint_dict(
+            ds.split_info.counts, 
+            message="Split counts",
+        )
+        pprint_dict(
+            ds.split_info.fractions, 
+            message="Split fractions",
+        )
+    if args.checkpoint is not None and isinstance(args.checkpoint, str):
+        ds.save(
+            args.checkpoint,
+            save_source_data=args.force_write_data,
+        )
+    return None
 
-        for i, _ds in enumerate(ds_together):
-            if _ds is None:
-                continue
-            print_err(f"Plotting splits from {_ds}, fold {i}")
-            
-            (fig, axes), df = plot_chemical_splits(
-                ds=_ds,
-                structure_column=args.structure,
-                input_representation=args.input_representation,
-                split_columns="split",
-                sample_size=args.plot_sample,
-                additional_columns=args.extras,
-                seed=args.plot_seed,
-                cache=cache,
-            )
-            plot_outdir = os.path.dirname(args.plot)
-            if len(plot_outdir) > 0:
-                os.makedirs(plot_outdir, exist_ok=True)
-            plot_root, ext = os.path.splitext(os.path.basename(args.plot))
-            figsaver(
-                format=ext.lstrip("."), 
-            )(fig, os.path.join(plot_outdir, f"{plot_root}-fold_{i}"), df=df)
 
+@clicommand("Writing checkpoint to tables with the following parameters")
+def _write(args: Namespace) -> None:
+
+    from providence.package_data import configure_hf_cache
+
+    cache, _, _ = configure_hf_cache(args.cache)
+
+    from ..utils.splitting import SplitDataset
+
+    ds = SplitDataset.load(
+        args.input_file,
+        cache_dir=args.cache,
+    )
+    
+    if args.output is not None and isinstance(args.output, str):
+        output = args.output
+        out_dir = os.path.dirname(output)
+        base = os.path.basename(output)
+        root, ext = os.path.splitext(base)
+        ds.write_tables(
+            Path(out_dir) / root,
+            format=ext,
+        )
+        pprint_dict(
+            ds.split_info.counts, 
+            message="Split counts",
+        )
+        pprint_dict(
+            ds.split_info.fractions, 
+            message="Split fractions",
+        )
+    return None
+
+
+@clicommand("Plot chemical splits with the following parameters")
+def _plot(args: Namespace) -> None:
+
+    from providence.package_data import configure_hf_cache
+
+    cache, _, _ = configure_hf_cache(args.cache)
+
+    from carabiner.mpl import figsaver
+    from ..utils.splitting.plot import plot_chemical_splits
+
+    plot_outdir = os.path.dirname(args.output)
+    if len(plot_outdir) > 0:
+        os.makedirs(plot_outdir, exist_ok=True)
+    plot_root, ext = os.path.splitext(os.path.basename(args.output))
+    _figsaver = figsaver(
+        format=ext.lstrip("."), 
+    )
+
+    if args.mode == "split":
+        from ..utils.splitting import SplitDataset
+        ds = SplitDataset.load(
+            args.input_file,
+            cache_dir=args.cache,
+        )
+
+        if args.structure is not None:
+            from datasets import concatenate_datasets
+            for split_key, _ds in ds.split_dataset.items():
+                if _ds is None or len(_ds) == 0:
+                    continue
+                n_rows = [d.num_rows for _, d in _ds.items()]
+                if any(n > 1_000_000 for n in n_rows):
+                    print_err(
+                        f"[WARN] Skipping {split_key} plots, too many rows: {n_rows}"
+                    )
+                    continue
+                print_err(f"Plotting splits from {split_key}: {_ds}")
+                _ds = concatenate_datasets([
+                    d.map(
+                        lambda x, c=k: x | {"split": k},
+                    ) for k, d in _ds.items()
+                ])
+                (fig, axes), df = plot_chemical_splits(
+                    ds=_ds,
+                    structure_column=args.structure,
+                    input_representation=args.input_representation,
+                    split_columns="split",
+                    sample_size=args.plot_sample,
+                    additional_columns=args.extras,
+                    seed=args.seed,
+                    cache=cache,
+                )
+                _figsaver(
+                    fig, 
+                    os.path.join(
+                        plot_outdir, 
+                        f"{plot_root}-{split_key}",
+                    ), 
+                    df=df,
+                )
+    elif args.mode == "percentiles":
+        from providence import DataResolver
+        ds = DataResolver(
+            args.input_file, 
+            cache_dir=cache,
+        )
+
+        (fig, axes), df = plot_chemical_splits(
+            ds=ds.data,
+            structure_column=args.structure,
+            input_representation=args.input_representation,
+            split_columns=[
+                col for col in ds.data.column_names 
+                if "_top_" in col
+            ],
+            sample_size=args.plot_sample,
+            additional_columns=args.extras,
+            seed=args.seed,
+            cache=cache,
+        )
+        _figsaver(
+            fig, 
+            os.path.join(
+                plot_outdir, 
+                plot_root,
+            ), 
+            df=df,
+        )
     return None

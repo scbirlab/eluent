@@ -16,5 +16,12 @@ HF_HOME="$CACHE" eluent percentiles \
     --batch 128 \
     --cache "$CACHE" \
     --output "$OUTPUT"/percentiles.csv \
-    --plot "$OUTPUT"/percentiles-plot.png \
     --structure smiles
+
+HF_HOME="$CACHE" eluent plot \
+    "$OUTPUT"/percentiles.csv \
+    --mode percentiles \
+    --cache "$CACHE" \
+    -S smiles \
+    --seed 42 \
+    --output "$OUTPUT"/percentiles.png

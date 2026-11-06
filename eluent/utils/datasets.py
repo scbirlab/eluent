@@ -16,8 +16,6 @@ else:
 import numpy as np
 from tqdm.auto import tqdm
 
-from .package_data import configure_hf_cache
-
 
 def _iter_dataset(ds):
     yield from ds
@@ -27,7 +25,7 @@ def to_dataset(
     ds: IterableDataset,
     batch_size: int = 1024,
     nrows: int | None = None,
-    cache: str | None = None
+    cache_dir: str | None = None
 ) -> Dataset:
     """Convert IterableDataset to Dataset.
 
@@ -39,8 +37,9 @@ def to_dataset(
     True
 
     """
+    from providence.package_data import configure_hf_cache
 
-    _, datasets_cache, _ = configure_hf_cache(cache)
+    _, datasets_cache, _ = configure_hf_cache(cache_dir)
 
     from datasets import Dataset, concatenate_datasets
     if isinstance(ds, Dataset):

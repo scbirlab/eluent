@@ -27,4 +27,4 @@ def split_dataset(
             ds = ds.group_and_split(**_method)
         else:
             raise ValueError(f"Unsupported splitting method: {_method}")
-    return ds.dataset
+    return ds

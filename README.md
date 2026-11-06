@@ -4,14 +4,13 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/eluent)
 ![PyPI](https://img.shields.io/pypi/v/eluent)
 
-<img src="docs/source/_static/logo.svg" width="200">
+<img src="docs/source/_static/logo.svg" width="200" alt="Eluent logo">
 
-**eluent** is a Python library and command-line tool for chemistry-aware splitting of large datasets
-for machine learning. It can group rows randomly, by Murcko scaffold, by connected components of
-a FAISS nearest-neighbor graph, or by existing group labels. It also supports holdouts across
-multiple grouping axes and adds percentile flags to numeric columns. It uses
-[🤗 Hugging Face Datasets](https://huggingface.co/docs/datasets/) for disk-backed processing and
-caching. Some steps, including FAISS indexing, also need in-memory working data.
+**eluent** is a Python library and command-line tool for chemistry-aware splitting of large datasets for machine learning.
+
+It supports random, Murcko scaffold, FAISS similarity-based, and group-aware partitioning, including disjoint splits across multiple grouping axes. Split definitions can be checkpointed and restored without recomputing group assignments or bin packing.
+
+Eluent uses [Providence](https://github.com/scbirlab/providence) for dataset loading, provenance tracking, and source integrity verification, and [🤗 Hugging Face Datasets](https://huggingface.co/docs/datasets/) for scalable dataset processing.
 
 ## Contents
 
@@ -20,27 +19,31 @@ caching. Some steps, including FAISS indexing, also need in-memory working data.
 - [Usage](#usage)
   - [Input data formats](#input-data-formats)
   - [Command-line interface](#command-line-interface)
-    - [Dataset splitting](#dataset-splitting-eluent-split)
-    - [Percentile annotation](#percentile-annotation-eluent-percentiles)
+    - [Dataset splitting](#dataset-splitting)
+    - [Split checkpoints](#split-checkpoints)
+    - [Exporting checkpoints](#exporting-checkpoints)
+    - [Plotting](#plotting)
+    - [Percentile annotation](#percentile-annotation)
   - [Python API](#python-api)
     - [Splitting datasets](#splitting-datasets)
+    - [Saving and restoring checkpoints](#saving-and-restoring-checkpoints)
     - [Annotating percentiles](#annotating-percentiles)
+- [Reproducibility](#reproducibility)
 - [Issues, problems, suggestions](#issues-problems-suggestions)
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
 
 ## Installation
 
-### The easy way
+### From PyPI
 
-Install the published package with Python 3.11 or later.
+Requires Python 3.11 or later.
 
 ```bash
 python -m pip install eluent
 ```
 
-For GPU-accelerated FAISS grouping through the Python API, install the optional GPU extra
-on a platform with a compatible `faiss-gpu` build and pass `gpu=True` to the FAISS method.
+For GPU-accelerated FAISS grouping, install the optional GPU dependencies on a supported platform:
 
 ```bash
 python -m pip install 'eluent[splits_gpu]'
@@ -48,23 +51,24 @@ python -m pip install 'eluent[splits_gpu]'
 
 ### From source
 
-Install the branch to use the multiway examples below.
-
 ```bash
-git clone --branch feat/multiway-split https://github.com/scbirlab/eluent.git
+git clone https://github.com/scbirlab/eluent.git
 cd eluent
-python -m pip install -e . six
+git checkout feat/providence-split-checkpoints
+python -m pip install -e .
 ```
 
-`six` is included because some releases of the transitive dependency
-`descriptastorus` import it without declaring it. If pip attempts to build
-`llvmlite` from source, retry with `--only-binary=numba,llvmlite` to select
-compatible wheels where available.
+Providence is installed automatically as a dependency.
+
+Some releases of the transitive dependency `descriptastorus` may require installing `six` separately. If necessary:
+
+```bash
+python -m pip install six
+```
 
 ## Quick Start
 
-After installing from source, generate a local CSV with four scaffolds, four assay batches,
-and eight measurements per scaffold–batch pair.
+Create a small example dataset containing four chemical scaffolds, four assay batches, and eight measurements per scaffold–batch combination.
 
 ```bash
 python - <<'PY'
@@ -72,46 +76,87 @@ import csv
 from itertools import product
 
 scaffolds = ["c1ccccc1", "c1ccncc1", "C1CCCCC1", "C1CCOCC1"]
+
 with open("molecules.csv", "w", newline="") as handle:
     writer = csv.writer(handle)
     writer.writerow(["id", "smiles", "batch", "score"])
-    for row, (smiles, batch, _) in enumerate(product(scaffolds, range(4), range(8))):
+    for row, (smiles, batch, _) in enumerate(
+        product(scaffolds, range(4), range(8))
+    ):
         writer.writerow([row, smiles, batch, row])
 PY
 ```
 
-Split by Murcko scaffold to hold out entire scaffolds.
+### 1. Split by chemical scaffold
+
+Ensure molecules sharing a Murcko scaffold are assigned to the same partition.
 
 ```bash
-eluent split molecules.csv --structure smiles --train 0.75 --test 0.25 \
-  --output demo/scaffold.csv
+eluent split molecules.csv \
+    --type scaffold \
+    --structure smiles \
+    --train 0.75 --test 0.25 \
+    --output demo/scaffold.csv
 ```
 
-Hold out both scaffold and assay batch. Two folds per axis produce four evaluations.
+### 2. Create a reproducible split checkpoint
+
+Save a split definition, including the source provenance and row assignments.
 
 ```bash
-eluent split molecules.csv --group-columns smiles batch --train 1 --kfolds 2 \
-  --output demo/multiway.csv
+eluent split molecules.csv \
+    --type scaffold \
+    --structure smiles \
+    --train 0.75 --test 0.25 \
+    --checkpoint demo/scaffold.el
 ```
 
-Flag the highest-scoring 10% of rows.
+### 3. Restore and export the split
+
+Recreate the partitioned datasets without rerunning the splitting algorithm.
 
 ```bash
-eluent percentiles molecules.csv --columns score --percentiles 10 --delta 0.25 \
-  --output demo/tagged.csv
+eluent write demo/scaffold.el \
+    --output demo/restored.csv
+```
+
+### 4. Evaluate generalisation across multiple axes
+
+Hold out entire chemical scaffolds and assay batches simultaneously.
+
+```bash
+eluent split molecules.csv \
+    --group-columns smiles batch \
+    --train 1 --kfolds 2 \
+    --checkpoint demo/multiway.el
+```
+
+Two folds on each axis produce four cross-validation evaluations.
+
+### 5. Annotate top-performing compounds
+
+Flag observations in the highest-scoring 10%.
+
+```bash
+eluent percentiles molecules.csv \
+    --columns score \
+    --percentiles 10 \
+    --delta 0.25 \
+    --output demo/tagged.csv
 ```
 
 ## Usage
 
 ### Input data formats
 
-Pass a local CSV, TSV or tab-delimited TXT file (optionally gzip-compressed), JSON, Parquet,
-Arrow, or XML file, or a Hugging Face dataset directory with a `.hf` suffix. The loader infers
-the format from the suffix. You can also pass a remote dataset from the
-[🤗 Datasets Hub](https://huggingface.co/datasets).
+Eluent delegates data loading to [Providence](https://github.com/scbirlab/providence).
+
+Supported inputs include local CSV, TSV, TXT, JSON and Parquet files, Hugging Face datasets, and Providence-supported checkpoint references. The Python API also accepts in-memory datasets and DataFrames.
+
+For Hugging Face Hub datasets, use:
 
 ```text
-hf://datasets/<owner>/<repo>~<config>:<split>
+hf://datasets/<owner>/<repo>@<revision>~<config>:<split>
 ```
 
 For example:
@@ -120,221 +165,526 @@ For example:
 hf://datasets/scbirlab/fang-2023-biogen-adme~scaffold-split:train
 ```
 
-The config and split are optional. You can add `@<revision>` after the repository name.
-If the Hub returns several splits because you omitted the split, eluent concatenates them.
-Use `--start` and `--end` to select a zero-based row range with an exclusive end.
+Revision, configuration, and split selectors are optional where supported.
 
-For file output, use CSV, TSV/TXT (also with gzip), JSON, Parquet, or a
-Hugging Face dataset directory. Use `.hf` for an explicit dataset directory. For an unrecognized
-output suffix, eluent appends `.hf` and saves a dataset directory.
+For a subset of rows, use `--start` and `--end`, with zero-based indexing and an exclusive end:
+
+```bash
+eluent split molecules.csv \
+    --start 100 --end 1000 \
+    --type random \
+    --train 0.8 --test 0.2 \
+    --checkpoint demo/subset.el
+```
 
 ### Command-line interface
 
-**eluent** provides two subcommands. Run these for the full option lists.
+Eluent provides four commands:
+
+| Command | Purpose |
+|---|---|
+| `eluent split` | Generate partitions and optionally checkpoint them |
+| `eluent write` | Export tables from a saved split checkpoint |
+| `eluent plot` | Visualise chemical splits or percentile annotations |
+| `eluent percentiles` | Annotate numeric columns by percentile |
+
+Run:
 
 ```bash
 eluent --help
-eluent --version
 eluent split --help
+eluent write --help
+eluent plot --help
 eluent percentiles --help
 ```
 
-Both commands accept `--cache`. It defaults to `ELUENT_CACHE` if set, then to the platform's
-user cache directory for eluent. Both can also plot a sampled UMAP embedding with `--plot`
-and `--structure`. Use `--plot-sample` (default 20,000), `--plot-seed` (default 42), and
-`--extras` to control the sample, seed, and additional columns used for coloring.
+Commands accept `--cache` where applicable. Cache configuration is delegated to Providence.
 
-#### Dataset splitting (`eluent split`)
+### Dataset splitting
 
-eluent assigns whole groups to splits using bin packing. Fractions are targets, so the achieved
-sizes depend on group sizes. Provide `--train`. For a single split, passing `--train` alone assigns
-the remainder to validation. Supplying either `--validation` or `--test` lets eluent infer the
-other. Use fractions that sum to 1 when specifying all three.
+Eluent assigns groups to partitions using bin packing. Requested split fractions are targets; achieved fractions depend on the number and size of groups.
 
-Pass `--seed` for deterministic greedy packing. Omitting it uses randomized packing with an
-internal seed of 42. The same seed also controls the row hashes for random grouping. Use `--batch`
-(default 16) to change the group annotation and packing batch size.
+Specify at least `--train`. For ordinary partitioning, omitting `--validation` and `--test` infers the remaining fractions. Explicit zero fractions are respected.
 
-The output path supplies the directory, filename stem, and format. For example,
-`--output demo/split.csv` writes `demo/fold_0/split_train.csv` and one file for each other split.
-Additional evaluations use `fold_1/`, `fold_2/`, and so on. A plot requested as
-`demo/split.png` is saved with a fold suffix such as `demo/split-fold_0.png`.
+Omitting `--seed` uses deterministic bin packing. Supplying `--seed` enables reproducible randomized packing; different seeds may produce different assignments.
 
-**Random splitting** hashes row indices into pseudo-unique groups. It requires no structure
-column. Keep the input row order fixed for repeatable group assignments.
+The same seed controls random grouping where applicable.
+
+#### Random splitting
+
+Assign observations to random groups using row-derived hashes.
 
 ```bash
-eluent split molecules.csv --type random --train 0.7 --validation 0.15 \
-  --seed 42 --output demo/random.csv
+eluent split molecules.csv \
+    --type random \
+    --train 0.7 --validation 0.15 --test 0.15 \
+    --seed 42 \
+    --output demo/random.csv
 ```
 
-**Scaffold splitting** is the default. Rows with the same Murcko scaffold stay together.
-Supply the structure column with `--structure`. For non-SMILES input, choose a representation
-supported by the requested conversion with `--input-representation`.
+Keep input row order fixed for reproducible random group assignments.
+
+#### Scaffold splitting
+
+Group molecules by Bemis–Murcko scaffold.
 
 ```bash
-eluent split molecules.csv --type scaffold --structure smiles \
-  --train 0.75 --test 0.25 --output demo/scaffold.csv
+eluent split molecules.csv \
+    --type scaffold \
+    --structure smiles \
+    --train 0.75 --test 0.25 \
+    --output demo/scaffold.csv
 ```
 
-**FAISS splitting** computes Morgan fingerprints from SMILES and groups rows by connected
-components of a binary nearest-neighbor graph using Hamming distance. A chain of neighbor links
-can join molecules into a large component, which can make target fractions hard to reach.
-`--n-neighbors` defaults to 10. Component labels are cached for repeat runs.
+Molecules with identical scaffolds remain in the same partition. Ringless molecules are grouped by canonical SMILES rather than all sharing an empty scaffold.
+
+For supported non-SMILES chemical representations, supply `--input-representation`.
+
+#### FAISS splitting
+
+Compute molecular fingerprints, identify neighbours using FAISS, and group molecules into connected components of the nearest-neighbour graph.
 
 ```bash
-eluent split molecules.csv --type faiss --structure smiles --n-neighbors 2 \
-  --train 0.75 --test 0.25 --cache ./cache --output demo/faiss.csv
+eluent split molecules.csv \
+    --type faiss \
+    --structure smiles \
+    --n-neighbors 2 \
+    --train 0.75 --test 0.25 \
+    --cache ./cache \
+    --output demo/faiss.csv
 ```
 
-**Existing groups** are selected with `--group-columns`, which takes precedence over
-`--type`. Supply one column to keep each group intact. With two or more distinct columns,
-eluent packs each axis independently and keeps a row in a split when every axis assigns
-it to that split. Rows with conflicting assignments are omitted from fixed splits.
-Fractions apply per axis before intersection, so the retained splits can be smaller than
-the requested fractions of the input.
+Connected components are assigned as indivisible groups. Large components can make requested split fractions difficult to achieve.
+
+The default number of neighbours is 10. FAISS processing may require substantial working memory.
+
+#### Splitting by existing groups
+
+Use `--group-columns` to specify columns already containing group labels. This overrides `--type`.
 
 ```bash
-eluent split molecules.csv --group-columns smiles batch --train 0.75 --test 0.25 \
-  --seed 42 --output demo/holdout.csv
+eluent split molecules.csv \
+    --group-columns batch \
+    --train 0.75 --test 0.25 \
+    --output demo/batch.csv
 ```
 
-**k-fold cross-validation** uses `--train` as the size of the entire cross-validation pool.
-With `--kfolds K` greater than 1, eluent ignores `--validation` and defaults the fixed test
-fraction to the remainder of the input. Each single-axis evaluation holds out one fold for
-validation, trains on the other folds, and reuses the fixed test split when present.
+All observations sharing a batch remain in the same partition.
+
+#### Multiway splitting
+
+Multiple grouping axes can be supplied together:
 
 ```bash
-eluent split molecules.csv --group-columns batch --train 0.75 --kfolds 3 \
-  --seed 42 --output demo/cv.csv
+eluent split molecules.csv \
+    --group-columns smiles batch \
+    --train 0.75 --test 0.25 \
+    --seed 42 \
+    --output demo/multiway.csv
 ```
 
-For multiway cross-validation, `K` folds on each of `D` axes produce `K**D` evaluations
-in Cartesian-product order of the supplied axes. Within the cross-validation pool, each
-evaluation has three parts.
+Each axis is partitioned independently. An observation enters a fixed partition only when the assignments agree across all axes.
 
-- `train` contains rows held out on zero axes.
-- `validation` contains rows held out on every axis.
-- `validation_partial` contains rows held out on some axes.
+For example, the training set contains observations whose scaffold and batch are both assigned to training.
 
-The training and full validation sets share no group labels on any axis. Each row in the
-cross-validation pool appears in full validation exactly once across the evaluations. When requested,
-the fixed `test` split is the intersection of test groups on all axes and is reused in every
-evaluation. A row assigned to the fixed test partition on only some axes is outside the
-cross-validation pool and the fixed test split.
+Rows with conflicting assignments are excluded from the corresponding fixed partitions. Consequently, achieved fractions may be substantially smaller than the requested fractions, which apply independently to each axis.
 
-#### Percentile annotation (`eluent percentiles`)
+This enables evaluation of generalisation along multiple dimensions, such as chemical scaffold, organism, or protein target.
 
-Add boolean columns flagging the top percentages of one or more numeric columns.
-eluent builds a T-Digest sketch in batches, then refines the selection near each cutoff.
-It targets the ceiling of the requested percentage of rows. When several distinct scores fall in the cutoff buffer,
-the refinement can select a different set of rows than an exact sort would. Output rows may
-be reordered.
+#### Cross-validation
+
+Set `--kfolds` to generate cross-validation partitions.
 
 ```bash
-eluent percentiles molecules.csv --columns score --percentiles 1 5 10 \
-  --compression 500 --delta 0.25 --output demo/percentiles.csv
+eluent split molecules.csv \
+    --group-columns batch \
+    --train 0.75 \
+    --kfolds 3 \
+    --seed 42 \
+    --checkpoint demo/cv.el
 ```
 
-Use `--columns` to supply at least one numeric column and `--percentiles` to override
-the default of 5. `--compression` controls the sketch and `--delta` sets the cutoff buffer
-in the column's units (CLI default 1.0). The output names are `<column>_top_<percentile>_pc`, for example
-`score_top_5_pc`. The suffix uses the integer part of the threshold, so use distinct integer
-thresholds to keep names unique. `--reverse` targets the lowest values and uses the same
-column naming convention.
+Here, 75% of groups are assigned to the cross-validation pool and the remainder to a fixed test partition.
 
-### Python API
+Each evaluation holds out one fold for validation and uses the remaining folds for training.
 
-#### Splitting datasets
+For multiway cross-validation, `K` folds across `D` grouping axes produce `K**D` evaluations.
 
-Use `split_dataset` with a Hugging Face `Dataset`. It returns a `DatasetDict` for a
-single evaluation and a tuple of `DatasetDict` objects for cross-validation.
+```bash
+eluent split molecules.csv \
+    --group-columns smiles batch \
+    --train 1 \
+    --kfolds 2 \
+    --checkpoint demo/multiway-cv.el
+```
+
+Each evaluation contains:
+
+- `train`: observations held out on no axes.
+- `validation`: observations held out on every axis.
+- `validation_partial`: observations held out on some, but not all, axes.
+
+When requested, a fixed `test` partition is reused across evaluations.
+
+The full training and validation sets are group-disjoint on every axis. Partial validation observations can be used to investigate intermediate generalisation regimes.
+
+### Split checkpoints
+
+A split checkpoint stores a reproducible partition definition independently of its exported tables.
+
+```bash
+eluent split molecules.csv \
+    --type scaffold \
+    --structure smiles \
+    --train 0.75 --test 0.25 \
+    --checkpoint demo/scaffold.el
+```
+
+To save both the checkpoint and partition tables:
+
+```bash
+eluent split molecules.csv \
+    --type scaffold \
+    --structure smiles \
+    --train 0.75 --test 0.25 \
+    --checkpoint demo/scaffold.el \
+    --output demo/scaffold.csv
+```
+
+A checkpoint contains:
+
+```text
+scaffold.el/
+├── schema.json
+├── info.json
+├── partition.parquet
+└── resolved.pv/
+    └── ...
+```
+
+The components have distinct responsibilities:
+
+| Component | Contents |
+|---|---|
+| `schema.json` | Checkpoint format version and component paths |
+| `info.json` | Partition names, counts, fractions and grouping metadata |
+| `partition.parquet` | Row-level partition assignments |
+| `resolved.pv/` | Nested Providence dataset checkpoint |
+
+Providence manages source provenance and integrity verification. Eluent records the resulting split assignments.
+
+For existing local or remote sources, the checkpoint may retain references rather than copying the entire dataset. To request embedding source data, use:
+
+```bash
+eluent split molecules.csv \
+    --type random \
+    --train 0.8 --test 0.2 \
+    --checkpoint demo/portable.el \
+    --force_write_data
+```
+
+Checkpoint restoration does not rerun the grouping or bin-packing algorithm.
+
+### Exporting checkpoints
+
+Use `eluent write` to materialise saved partitions into tables.
+
+```bash
+eluent write demo/scaffold.el \
+    --output demo/restored.csv
+```
+
+For Parquet output:
+
+```bash
+eluent write demo/scaffold.el \
+    --output demo/restored.parquet
+```
+
+The output path supplies the base directory and file format. For example, `--output demo/restored.parquet` produces files under:
+
+```text
+demo/restored/
+└── fold_x/
+    ├── train.parquet
+    └── test.parquet
+```
+
+Cross-validation checkpoints generate one directory per evaluation. Generated fold names are retained so that the saved partition definitions can be reconstructed.
+
+### Plotting
+
+Plotting is a separate command, allowing saved checkpoints and annotated tables to be visualised without repeating the original computation.
+
+#### Plot split assignments
+
+```bash
+eluent plot demo/scaffold.el \
+    --mode split \
+    --structure smiles \
+    --output demo/scaffold.png
+```
+
+#### Plot percentile annotations
+
+```bash
+eluent plot demo/tagged.csv \
+    --mode percentiles \
+    --structure smiles \
+    --output demo/percentiles.png
+```
+
+Eluent generates a sampled UMAP embedding of chemical structures, coloured by split assignment or percentile annotation.
+
+Use `--plot-sample` (default 20,000), `--seed`, and `--extras` to control sampling, embedding reproducibility, and additional colouring variables.
+
+Plotting requires a structure column and may involve substantial computation for large datasets.
+
+### Percentile annotation
+
+Use `eluent percentiles` to flag observations in the top or bottom percentages of numeric columns.
+
+```bash
+eluent percentiles molecules.csv \
+    --columns score \
+    --percentiles 1 5 10 \
+    --compression 500 \
+    --delta 0.25 \
+    --output demo/percentiles.csv
+```
+
+Eluent uses a T-Digest sketch to estimate percentile thresholds, then refines selection near each cutoff.
+
+The default percentile is 5%. `--compression` controls sketch resolution and `--delta` determines the refinement buffer in the column's units.
+
+Output columns follow:
+
+```text
+<column>_top_<percentile>_pc
+```
+
+For example:
+
+```text
+score_top_1_pc
+score_top_5_pc
+score_top_10_pc
+```
+
+Use `--reverse` to select the lowest values.
+
+The refinement procedure targets the requested number of observations, but results near a cutoff may differ from a complete exact sort. Output rows may be reordered.
+
+## Python API
+
+### Splitting datasets
+
+The principal entry points are `split_dataset()` and `SplitDataset`.
+
+Both accept Providence-compatible data inputs.
 
 ```python
 from datasets import load_dataset
 from eluent.utils.splitting import split_dataset
 
-ds = load_dataset("csv", data_files="molecules.csv", split="train")
+data = load_dataset(
+    "csv",
+    data_files="molecules.csv",
+    split="train",
+)
 
+result = split_dataset(
+    data,
+    method="scaffold",
+    structure_column="smiles",
+    train=0.75,
+    test=0.25,
+)
+
+print(result.split_info.counts)
+```
+
+`split_dataset()` returns a `SplitDataset` instance, containing three related objects:
+
+| Attribute | Description |
+|---|---|
+| `.dataset` | Annotated source dataset, represented as a DatasetDict |
+| `.split_dataset` | Mapping of evaluations to partitioned DatasetDict objects |
+| `.split_info` | Grouping, partition and count metadata |
+
+Access the ordinary partitions using:
+
+```python
+train = result.split_dataset["fold_x"]["train"]
+test = result.split_dataset["fold_x"]["test"]
+```
+
+#### Other splitting methods
+
+```python
 random_split = split_dataset(
-    ds, method="random", train=0.7, validation=0.15, seed=42
+    data,
+    method="random",
+    train=0.7,
+    validation=0.15,
+    test=0.15,
+    seed=42,
 )
-scaffold_split = split_dataset(
-    ds, method="scaffold", structure_column="smiles", train=0.75, test=0.25
-)
+
 faiss_split = split_dataset(
-    ds, method="faiss", structure_column="smiles", n_neighbors=2,
-    train=0.75, test=0.25, cache="./cache",
+    data,
+    method="faiss",
+    structure_column="smiles",
+    n_neighbors=2,
+    train=0.75,
+    test=0.25,
+    cache="./cache",
 )
 ```
 
-For single-axis cross-validation, pass `kfolds` greater than 1 to any of these methods.
+#### Multiway splitting
 
-Pass `method=None` to use existing group labels. Use a string for single-axis splitting
-and a list or tuple of distinct column names for multiway splitting.
+Supply existing grouping columns using `group_column`.
 
 ```python
-folds = split_dataset(
-    ds,
+result = split_dataset(
+    data,
     method=None,
     group_column=("smiles", "batch"),
     train=1.0,
     kfolds=2,
 )
-for fold in folds:
-    print(len(fold["train"]), len(fold["validation"]), len(fold["validation_partial"]))
+
+for fold_name, fold in result.split_dataset.items():
+    print(
+        fold_name,
+        len(fold["train"]),
+        len(fold["validation"]),
+        len(fold["validation_partial"]),
+    )
 ```
 
-For finer control, use the `SplitDataset` class directly. `group_and_split` updates the
-wrapper and returns it. Its optional `splits` mapping adds or overrides inferred split
-weights. `split` partitions existing groups using an explicit mapping of
-split names to fractions and returns the partitions directly. When initialized with a
-`DatasetDict`, the wrapper splits the selected `key` (default `"train"`) and passes through
-the other entries. Use distinct names for the generated splits and the entries you want to keep.
+#### Using `SplitDataset` directly
+
+For more control, instantiate the class explicitly:
 
 ```python
-from eluent.utils.splitting.splitter import SplitDataset
+from eluent.utils.splitting import SplitDataset
 
-sd = SplitDataset(ds)
-sd.group_and_split(
-    method="scaffold", structure_column="smiles", train=0.75, test=0.25
+splitter = SplitDataset(data)
+
+splitter.group_and_split(
+    method="scaffold",
+    structure_column="smiles",
+    train=0.75,
+    test=0.25,
 )
-result = sd.dataset
+
+print(splitter.split_info.fractions)
 ```
 
-#### Annotating percentiles
+`group_and_split()` annotates and partitions the dataset, updates the wrapper, and returns `self`.
 
-The percentile API accepts a `Dataset` or an `IterableDataset`. The latter is returned as
-an iterable after refinement, which materializes data for sorting and concatenation.
+The lower-level `split()` method accepts existing grouping columns and explicit split weights. It returns the annotated dataset, partition mapping, and split metadata as a tuple.
+
+### Saving and restoring checkpoints
+
+```python
+from eluent.utils.splitting import SplitDataset
+
+splitter = SplitDataset("molecules.csv")
+
+splitter.group_and_split(
+    method="scaffold",
+    structure_column="smiles",
+    train=0.75,
+    test=0.25,
+)
+
+splitter.save("demo/scaffold.el")
+```
+
+Restore the exact split assignments:
+
+```python
+restored = SplitDataset.load(
+    "demo/scaffold.el",
+    cache_dir="./cache",
+)
+
+train = restored.split_dataset["fold_x"]["train"]
+test = restored.split_dataset["fold_x"]["test"]
+```
+
+Export the restored partitions:
+
+```python
+restored.write_tables(
+    "demo/restored",
+    format="parquet",
+)
+```
+
+For a self-contained checkpoint where source data must be embedded:
+
+```python
+splitter.save(
+    "demo/portable.el",
+    save_source_data=True,
+)
+```
+
+### Annotating percentiles
+
+The Python API supports Hugging Face `Dataset` and `IterableDataset` inputs.
 
 ```python
 from eluent.utils.splitting.top_k import percentiles
 
 tagged = percentiles(
-    ds=ds,
+    ds=data,
     q={"score": [1, 5, 10]},
     compression=500,
     delta=0.25,
-    cache="./cache",
+    cache_dir="./cache",
 )
-# New columns: score_top_1_pc, score_top_5_pc, score_top_10_pc
 ```
+
+The result contains boolean annotation columns such as `score_top_5_pc`.
+
+## Reproducibility
+
+Eluent and Providence divide reproducibility responsibilities.
+
+**Providence** manages dataset resolution, source metadata, checkpointing, and source integrity. Local source files and embedded checkpoint data can be verified using checksums. Hugging Face revisions are pinned to resolved commits.
+
+**Eluent** manages group assignments, partition generation, cross-validation definitions, and saved row-level membership.
+
+Together, they allow an experiment to retain both the identity of its input data and the precise partition definitions used for training and evaluation.
+
+For reproducible workflows:
+
+1. Keep dataset row order stable, especially for random grouping.
+2. Record the grouping method, parameters, and seed.
+3. Save the split checkpoint alongside model configuration and results.
+4. Restore saved assignments rather than recomputing partitions when repeating an experiment.
+
+A checkpoint referencing an external source requires that source to remain accessible.
 
 ## Issues, problems, suggestions
 
-Add to the [issue tracker](https://github.com/scbirlab/eluent/issues).
+Please use the [GitHub issue tracker](https://github.com/scbirlab/eluent/issues).
 
 ## Documentation
 
-(To come at [ReadTheDocs](https://eluent.readthedocs.org).)
+Additional documentation is planned at [ReadTheDocs](https://eluent.readthedocs.org).
 
 ## Roadmap
 
-The following features are planned for future releases:
+Potential future improvements include:
 
-- **Additional grouping methods** for pharmacophores, reaction centers, and taxonomy.
-- **Additional FAISS featurizers** such as configurable ECFP, MACCS keys, RDKit topological
-  fingerprints, and learned molecular embeddings.
-- **Additional split strategies** for preserving target-label balance or respecting time order.
-- **Hierarchical splitting** to chain grouping passes, such as scaffold followed by random
-  splitting, into nested splits.
+- **Additional grouping methods** for pharmacophores, reaction centres, and taxonomy.
+- **Additional FAISS featurizers** including configurable ECFP, MACCS keys, RDKit topological fingerprints, and learned embeddings.
+- **Additional split strategies** to preserve target-label distributions or respect time order.
+- **Hierarchical splitting** to chain multiple grouping and partitioning operations.
+- **Extended checkpoint validation** for additional dataset and partition transformations.
