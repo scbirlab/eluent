@@ -1,17 +1,17 @@
-from typing import Mapping, Optional, Union
-
 from argparse import Namespace
 import os
 
 from carabiner import pprint_dict, print_err
 from carabiner.cliutils import clicommand
 
-from .io import _resolve_and_slice_data, _save_dataset
-from ..utils.package_data import configure_hf_cache
+from .io import _save_dataset
 
 
 @clicommand("Splitting data with the following parameters")
 def _split(args: Namespace) -> None:
+
+    from providence import DataResolver
+    from providence.package_data import configure_hf_cache
 
     cache, _, _ = configure_hf_cache(args.cache)
 
@@ -29,12 +29,11 @@ def _split(args: Namespace) -> None:
     if args.train is None:
         raise ValueError(f"You need to at least provide a --train fraction.")
     
-    ds = _resolve_and_slice_data(
-        args.input_file,
-        start=args.start,
-        end=args.end,
-        cache=cache,
+    resolved = (
+        DataResolver(args.input_file, cache_dir=cache)
+        .select_rows(args.start, args.end)
     )
+
     group_columns = args.group_columns
     if group_columns is not None:
         group_column = group_columns[0] if len(group_columns) == 1 else group_columns
@@ -49,7 +48,7 @@ def _split(args: Namespace) -> None:
         }
 
     ds = split_dataset(
-        ds=ds,
+        ds=resolved.data,
         method=None if group_columns else args.type,
         group_column=group_column,
         structure_column=args.structure,

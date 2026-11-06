@@ -64,7 +64,7 @@ def main() -> None:
     slice_start = CLIOption(
         '--start', 
         type=int,
-        default=0,
+        default=None,
         help='First row of dataset to process.',
     )
     slice_end = CLIOption(

@@ -1,17 +1,17 @@
-from typing import Mapping, Optional, Union
-
 from argparse import Namespace
 import os
 
 from carabiner import print_err
 from carabiner.cliutils import clicommand
 
-from .io import _resolve_and_slice_data, _save_dataset
-from ..utils.package_data import configure_hf_cache
+from .io import _save_dataset
 
 
 @clicommand("Tagging data percentiles with the following parameters")
 def _percentile(args: Namespace) -> None:
+
+    from providence import DataResolver
+    from providence.package_data import configure_hf_cache
 
     cache, _, _ = configure_hf_cache(args.cache)
 
@@ -31,19 +31,14 @@ def _percentile(args: Namespace) -> None:
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     
-    ds = _resolve_and_slice_data(
-        args.input_file,
-        start=args.start,
-        end=args.end,
-        cache=cache,
+    resolved = (
+        DataResolver(args.input_file, cache_dir=cache)
+        .select_rows(args.start, args.end)
     )
-    # print(ds)
-    # for b in ds:
-    #     print(b)
-    #     break
+    
     q = {col: args.percentiles for col in args.columns}
     ds = percentiles(
-        ds=ds,
+        ds=resolved.data,
         q=q,
         compression=args.compression,
         delta=args.delta,
