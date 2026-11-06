@@ -35,16 +35,23 @@ def _split(args: Namespace) -> None:
         end=args.end,
         cache=cache,
     )
-    if args.type == "faiss":
+    group_columns = args.group_columns
+    if group_columns is not None:
+        group_column = group_columns[0] if len(group_columns) == 1 else group_columns
+    else:
+        group_column = "group"
+
+    faiss_opts = {}
+    if not group_columns and args.type == "faiss":
         faiss_opts = {
             "cache": cache,
             "n_neighbors": args.n_neighbors,
         }
-    else:
-        faiss_opts = {}
+
     ds = split_dataset(
         ds=ds,
-        method=args.type,
+        method=None if group_columns else args.type,
+        group_column=group_column,
         structure_column=args.structure,
         input_representation=args.input_representation,
         train=args.train,
@@ -73,19 +80,31 @@ def _split(args: Namespace) -> None:
                 split_ds, 
                 this_filename,
             )
-            _ds_together.append(split_ds)
+            if args.plot is not None and split_nrows > 0:
+                if group_columns and len(group_columns) > 1:
+                    if "split" in split_ds.column_names:
+                        split_ds = split_ds.remove_columns("split")
+                    split_ds = split_ds.add_column("split", [key] * split_nrows)
+                _ds_together.append(split_ds)
         split_fractions = {
-            key: val / total_rows 
-            for key, val in row_counts.items()
+            key: count / total_rows if total_rows else 0.0
+            for key, count in row_counts.items()
         }
         pprint_dict(split_fractions, message=f"Split fractions, fold {i + 1}")
-        ds_together.append(concatenate_datasets(_ds_together))
+        if args.plot is not None:
+            ds_together.append(
+                concatenate_datasets(_ds_together) 
+                if len(_ds_together) > 0
+                else None
+            )
 
     if args.plot is not None:
         from carabiner.mpl import figsaver
         from ..utils.splitting.plot import plot_chemical_splits
 
         for i, _ds in enumerate(ds_together):
+            if _ds is None:
+                continue
             print_err(f"Plotting splits from {_ds}, fold {i}")
             
             (fig, axes), df = plot_chemical_splits(

@@ -1,8 +1,7 @@
-from typing import Mapping, Optional, Union
-
 from carabiner import print_err
 
 from ..utils.package_data import CACHE_DIR
+from ..utils.splitting.utils import dataset_len
 
 
 def _resolve_and_slice_data(
@@ -12,16 +11,23 @@ def _resolve_and_slice_data(
     batch_size: int = 1024,
     cache: str | None = None
 ):
+    from datasets import DatasetDict, IterableDatasetDict
     from ..utils.datasets_io import AutoDataset
-    # from .utils.datasets import to_dataset
 
-    candidates_ds = AutoDataset.load(data, cache=cache)._dataset
-    nrows = candidates_ds.num_rows
-    skip = start or 0
-    take = (end or nrows) - skip
+    ds = AutoDataset.load(data, cache=cache)._dataset
+    if isinstance(ds, (DatasetDict, IterableDatasetDict)):
+        if len(ds) != 1:
+            raise ValueError(
+                "Expected one dataset split. "
+                f"Select a split explicitly from {list(ds)}."
+            )
+        ds = next(iter(ds.values()))
+    nrows = dataset_len(ds)
+    skip = 0 if start is None else start
+    take = (nrows if end is None else end) - skip
     if (take - skip) < nrows:
         print_err(f"[INFO] Reading dataset from row {skip} to row {take + skip} / {nrows}.")
-    return candidates_ds.skip(skip).take(take)
+    return ds.skip(skip).take(take)
 
 
 def _save_dataset(
