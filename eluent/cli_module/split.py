@@ -179,6 +179,7 @@ def _plot(args: Namespace) -> None:
                         df=df,
                     )
     elif args.mode == "percentiles":
+        from providence import DataResolver
         ds = DataResolver(
             args.input_file, 
             cache_dir=cache,
@@ -189,19 +190,15 @@ def _plot(args: Namespace) -> None:
             structure_column=args.structure,
             input_representation=args.input_representation,
             split_columns=[
-                col for col in ds.column_names 
-                if any(
-                    f"{_q}_top_" in col 
-                    for _q in q
-                )
+                col for col in ds.data.column_names 
+                if "_top_" in col
             ],
             sample_size=args.plot_sample,
             additional_columns=args.extras,
-            seed=args.plot_seed,
+            seed=args.seed,
             cache=cache,
         )
-        root, ext = os.path.splitext(args.plot)
-        _figsaver(fig, root, df=df)
+        _figsaver(fig, plot_root, df=df)
 
     return None
 

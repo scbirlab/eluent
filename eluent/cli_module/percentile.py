@@ -46,30 +46,4 @@ def _percentile(args: Namespace) -> None:
         cache_dir=cache,
     )
     _save_dataset(ds, output)
-
-    # if args.plot is not None:
-
-    #     from carabiner.mpl import figsaver
-    #     from ..utils.splitting.plot import plot_chemical_splits
-
-    #     print_err(f"Plotting top percentiles...")
-
-    #     (fig, axes), df = plot_chemical_splits(
-    #         ds=ds,
-    #         structure_column=args.structure,
-    #         input_representation=args.input_representation,
-    #         split_columns=[
-    #             col for col in ds.column_names 
-    #             if any(
-    #                 f"{_q}_top_" in col 
-    #                 for _q in q
-    #             )
-    #         ],
-    #         sample_size=args.plot_sample,
-    #         additional_columns=args.extras,
-    #         seed=args.plot_seed,
-    #         cache=cache,
-    #     )
-    #     root, ext = os.path.splitext(args.plot)
-    #     figsaver(format=ext.lstrip("."))(fig, root, df=df)
     return None
