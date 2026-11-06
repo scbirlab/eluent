@@ -32,8 +32,7 @@ def add_faiss_index(
 
     from filelock import FileLock
     from providence.package_data import configure_hf_cache
-
-    from ..datasets_io import hasher, _lock_path
+    from providence.io import hasher, _lock_path
 
     cache, *_ = configure_hf_cache(cache)
     ds_fingerprint = ds._fingerprint
