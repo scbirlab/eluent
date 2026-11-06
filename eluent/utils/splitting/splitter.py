@@ -232,6 +232,23 @@ class SplitDataset:
             cache_dir=cache_dir,
         ).data
 
+        if isinstance(resolved.data, DatasetDict):
+            source = source[info.key]
+
+        resolved_len = dataset_len(resolved.data)
+        partition_len = dataset_len(partition_table)
+        if resolved_len != partition_len:
+            raise ValueError(
+                "Checkpoint partition length does not match source data: "
+                f"{resolved_len=} != {partition_len=}"
+            )
+
+        missing = set(info.partition_columns) - set(partition_table.column_names)
+        if missing:
+            raise ValueError(
+                f"Checkpoint is missing partition columns: {sorted(missing)}"
+            )
+
         obj = cls(data=resolved)
         obj.split_info = info
         other_splits = {k: d for k,d in obj.dataset.items() if k != info.key}
