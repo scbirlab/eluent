@@ -175,9 +175,10 @@ def _plot(args: Namespace) -> None:
                     fig, 
                     os.path.join(
                         plot_outdir, 
-                        f"{plot_root}-{split_key}"), 
-                        df=df,
-                    )
+                        f"{plot_root}-{split_key}",
+                    ), 
+                    df=df,
+                )
     elif args.mode == "percentiles":
         from providence import DataResolver
         ds = DataResolver(
@@ -198,6 +199,12 @@ def _plot(args: Namespace) -> None:
             seed=args.seed,
             cache=cache,
         )
-        _figsaver(fig, plot_root, df=df)
-
+        _figsaver(
+            fig, 
+            os.path.join(
+                plot_outdir, 
+                plot_root,
+            ), 
+            df=df,
+        )
     return None
