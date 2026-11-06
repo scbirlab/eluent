@@ -82,21 +82,71 @@ def _split(args: Namespace) -> None:
             args.checkpoint,
             save_source_data=args.force_write_data,
         )
+    return None
 
-    if args.plot is not None and args.structure is not None:
+
+@clicommand("Writing checkpoint to tables with the following parameters")
+def _write(args: Namespace) -> None:
+
+    from providence.package_data import configure_hf_cache
+
+    cache, _, _ = configure_hf_cache(args.cache)
+
+    from ..utils.splitting import SplitDataset
+
+    ds = SplitDataset.load(
+        args.input_file,
+        cache_dir=args.cache,
+    )
+    
+    if args.output is not None and isinstance(args.output, str):
+        output = args.output
+        out_dir = os.path.dirname(output)
+        base = os.path.basename(output)
+        root, ext = os.path.splitext(base)
+        ds.write_tables(
+            Path(out_dir) / root,
+            format=ext,
+        )
+        pprint_dict(
+            ds.split_info.counts, 
+            message="Split counts",
+        )
+        pprint_dict(
+            ds.split_info.fractions, 
+            message="Split fractions",
+        )
+    return None
+
+
+@clicommand("Plot chemical splits with the following parameters")
+def _plot(args: Namespace) -> None:
+
+    from providence.package_data import configure_hf_cache
+
+    cache, _, _ = configure_hf_cache(args.cache)
+
+    from ..utils.splitting import SplitDataset
+
+    ds = SplitDataset.load(
+        args.input_file,
+        cache_dir=args.cache,
+    )
+
+    if args.output is not None and args.structure is not None:
         from carabiner.mpl import figsaver
         from datasets import concatenate_datasets
         from ..utils.splitting.plot import plot_chemical_splits
         
-        plot_outdir = os.path.dirname(args.plot)
+        plot_outdir = os.path.dirname(args.output)
         if len(plot_outdir) > 0:
             os.makedirs(plot_outdir, exist_ok=True)
-        plot_root, ext = os.path.splitext(os.path.basename(args.plot))
+        plot_root, ext = os.path.splitext(os.path.basename(args.output))
         _figsaver = figsaver(
             format=ext.lstrip("."), 
         )
 
-        for split_key, _ds in ds.dataset.items():
+        for split_key, _ds in ds.split_dataset.items():
             if _ds is None or len(_ds) == 0:
                 continue
             n_rows = [d.num_rows for _, d in _ds.items()]
@@ -118,9 +168,17 @@ def _split(args: Namespace) -> None:
                 split_columns="split",
                 sample_size=args.plot_sample,
                 additional_columns=args.extras,
-                seed=args.plot_seed,
+                seed=args.seed,
                 cache=cache,
             )
-            _figsaver(fig, os.path.join(plot_outdir, f"{plot_root}-{split_key}"), df=df)
+            _figsaver(
+                fig, 
+                os.path.join(
+                    plot_outdir, 
+                    f"{plot_root}-{split_key}"), 
+                    df=df,
+                )
 
     return None
+
+

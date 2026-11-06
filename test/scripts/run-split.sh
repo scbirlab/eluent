@@ -21,4 +21,16 @@ HF_HOME="$CACHE" eluent split \
     --seed 42 \
     --cache "$CACHE" \
     --output "$OUTPUT"/$TYPE.csv \
-    --plot "$OUTPUT"/$TYPE-plot.png
+    --checkpoint "$OUTPUT"/$TYPE.el
+
+HF_HOME="$CACHE" eluent write \
+    "$OUTPUT"/$TYPE.el \
+    --cache "$CACHE" \
+    --output "$OUTPUT"/from-chk/$TYPE.csv
+
+HF_HOME="$CACHE" eluent plot \
+    "$OUTPUT"/$TYPE.el \
+    --cache "$CACHE" \
+    -S smiles \
+    --seed 42 \
+    --output "$OUTPUT"/from-chk/$TYPE-plot.png

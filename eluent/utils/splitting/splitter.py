@@ -31,6 +31,7 @@ SCHEMA: dict[str, str | int] = {
     "partition_table": "partition.parquet",
     "resolved": "resolved.pv",
 }
+SCHEMA_FILENAME: str = "schema.json"
 
 
 def _partition_by_bool_column(
@@ -80,6 +81,7 @@ class SplitInfo:
     partition_columns: tuple[str]
     fixed_columns: tuple[str]
     fold_columns: tuple[str]
+    group_columns: tuple[str]
 
     def to_config(self, path: str | PathLike):
         path = Path(path)
@@ -130,6 +132,7 @@ class SplitDataset:
         self._requested_data = data
         self.resolved = resolved
         self.dataset = dataset
+        self.split_dataset = None
         self.split_info = None
 
     def save(
@@ -138,12 +141,12 @@ class SplitDataset:
         save_source_data: bool = False
     ):
         path = Path(path)
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         source_file_exists = (
-            self.resolved.source.uri is not None 
-            and os.path.isfile(self.resolved.source.uri)
+            self.resolved.data_source.uri is not None 
+            and Path(self.resolved.data_source.uri).exists()
         )
-        reference_only = self.resolved.source.is_remote or source_file_exists
+        reference_only = self.resolved.data_source.is_remote or source_file_exists
         self.resolved.save(
             path / SCHEMA["resolved"],
             save_source_data=save_source_data or not reference_only,
@@ -152,7 +155,7 @@ class SplitDataset:
             if isinstance(self.split_info, SplitInfo):
                 self.split_info.to_config(path / SCHEMA["info"])
                 partition_table = (
-                    self.resolved.data
+                    self.dataset
                     .select_columns(list(self.split_info.partition_columns))
                 )
                 partition_table.to_parquet(path / SCHEMA["partition_table"])
@@ -160,8 +163,8 @@ class SplitDataset:
                 raise ValueError(f"Split info is not SplitInfo: {self.split_info}")
         else:
             raise ValueError(f"Split info is missing!")  # should never happen
-        with open(path / SCHEMA_FILENAME) as f:
-            json.write(SCHEMA, f)
+        with open(path / SCHEMA_FILENAME, "w") as f:
+            json.dump(SCHEMA, f, indent=4)
         return None
 
     def write_tables(
@@ -171,15 +174,16 @@ class SplitDataset:
     ):
         from datasets import Dataset, DatasetDict, IterableDataset
         path = Path(path)
-        if isinstance(self.dataset, DatasetDict):
-            ds = {"fold_x": self.dataset}
-        elif isinstance(self.dataset, (Dataset, IterableDataset)):
-            ds = {"fold_x": DatasetDict({"train": self.dataset})}
-        elif isinstance(self.dataset, Mapping):
-            ds = dict(self.dataset)
+        ds = self.split_dataset
+        if isinstance(ds, DatasetDict):
+            ds = {"fold_x": ds}
+        elif isinstance(ds, (Dataset, IterableDataset)):
+            ds = {"fold_x": DatasetDict({"train": ds})}
+        elif isinstance(ds, Mapping):
+            ds = dict(ds)
         else:
             # should never happen
-            raise AttributeError(f"Dataset is not correct! {self.dataset=}")
+            raise AttributeError(f"Dataset is not correct! {ds=}")
         for fold_key, fold in ds.items():
             fold_dir = path / str(fold_key)
             fold_dir.mkdir(parents=True, exist_ok=True)
@@ -205,7 +209,7 @@ class SplitDataset:
         path: str | PathLike,
         cache_dir: str
     ) -> "SplitDataset":
-        from datasets import concatenate_datasets
+        from datasets import concatenate_datasets, DatasetDict
         from providence import DataResolver
         
         path = Path(path)
@@ -218,29 +222,30 @@ class SplitDataset:
                 f"but package on version {SCHEMA_VERSION}"
             )
         resolved = DataResolver.load(
-            path / schema[SCHEMA["resolved"]],
+            path / schema["resolved"],
             cache_dir=cache_dir,
         )
-        info = SplitInfo.from_config(path / schema[SCHEMA["info"]])
+        info = SplitInfo.from_config(path / schema["info"])
         partition_table = DataResolver(
-            path / schema[SCHEMA["partition_table"]],
+            path / schema["partition_table"],
             cache_dir=cache_dir,
         ).data
 
         obj = cls(data=resolved)
         obj.split_info = info
-        other_splits = {k: d for k,d in obj.dataset if k != info.key}
+        other_splits = {k: d for k,d in obj.dataset.items() if k != info.key}
         
+        ds = concatenate_datasets([
+            obj.dataset[info.key],
+            partition_table,
+        ], axis=1)
         split_dataset = _partition_by_bool_column(
-            concatenate_datasets([
-                obj.dataset[info.key],
-                partition_table,
-            ], axis=1),
+            DatasetDict({**obj.dataset, info.key: ds}),
             fixed_columns=info.fixed_columns,
             fold_columns=info.fold_columns,
             key=info.key,
         )
-        obj.dataset = split_dataset
+        obj.split_dataset = split_dataset
         return obj
 
     def group(
@@ -650,8 +655,9 @@ class SplitDataset:
             counts=split_counter,
             fractions=split_fracs,
             partition_columns=tuple(partition_columns),
-            fixed_columns=fixed_columns,
-            fold_columns=fold_columns,
+            fixed_columns=tuple(fixed_columns),
+            fold_columns=tuple(fold_columns),
+            group_columns=tuple(group_column),
         )
         return ds, split_ds, split_info
 
@@ -789,6 +795,7 @@ class SplitDataset:
             splits=splits,
             **kwargs,
         )
-        self.dataset = split_dataset
+        self.dataset = dataset
+        self.split_dataset = split_dataset
         self.split_info = info
         return self
