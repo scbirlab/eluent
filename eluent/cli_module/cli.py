@@ -54,10 +54,14 @@ def main() -> None:
         default=16,
         help='Batch size for training.',
     )
+    checkpoint = CLIOption(
+        '--checkpoint', '-c', 
+        type=str,
+        help='Checkpoint directory.',
+    )
     output_name = CLIOption(
         '--output', '-o', 
         type=str,
-        required=True,
         help='Output filename.',
     )
     # slice dataset
@@ -189,6 +193,7 @@ def main() -> None:
             random_seed,
             cache,
             output_name,
+            checkpoint,
             batch_size,
             kfolds,
         ] + train_test_val,
@@ -208,7 +213,7 @@ def main() -> None:
             slice_start,
             slice_end,
             cache,
-            output_name,
+            output_name.replace(required=True),
             batch_size,
             do_plot,
             structure_col,

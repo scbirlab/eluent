@@ -1,39 +1,260 @@
 """Base splitting object."""
-from typing import Callable, Iterable, Mapping, Optional, Union
+
+from typing import TYPE_CHECKING, Any
 from collections.abc import Callable, Iterable, Mapping
-from collections import defaultdict
+from dataclasses import asdict, dataclass
 from functools import partial
 from itertools import product
+import json
 from math import isfinite
+from os import PathLike
+from pathlib import Path
 
-from datasets import Dataset, DatasetDict, IterableDataset
+if TYPE_CHECKING:
+    from datasets import Dataset, DatasetDict, IterableDataset
+    from providence.typing import DataLike
+else:
+    Dataset, DatasetDict, IterableDataset = Any, Any, Any
+    DataLike = Any
 
 from .decorators import process_splits
 from .bin_packing import pack_bins
-from .faiss import add_faiss_index
 from .grouping import GROUPING_FUNCTIONS, annotate_split, annotate_split_invert, annotate_split_invert_fixed
+from .utils import dataset_len, save_dataset
 
 DEFAULT_BATCH_SIZE: int = 1024
 DEFAULT_SEED: int = 42
+SCHEMA_VERSION: int = 1
+SCHEMA: dict[str, str | int] = {
+    "schema_version": SCHEMA_VERSION,
+    "info": "info.json",
+    "partition_table": "partition.parquet",
+    "resolved": "resolved.pv",
+}
+
+
+def _partition_by_bool_column(
+    dataset: DatasetDict,
+    fixed_columns: Iterable[str],
+    fold_columns: Iterable[str] | None = None, 
+    key: str = "train",
+    fold_split_keys: Iterable[str] = ("train", "validation", "validation_partial")
+) -> dict[DatasetDict]:
+    from datasets import Dataset, DatasetDict
+
+    ds = dataset[key]
+    desc = {"desc": "Generating split datasets"} if isinstance(ds, Dataset) else {}
+    other_splits = {k: d for k, d in dataset.items() if k != key}
+    fixed_columns = list(fixed_columns)
+    fold_columns = list(fold_columns)
+
+    fixed_ds = {
+        _split: ds.filter(lambda x, k=_split: x[k], **desc)
+        for _split in fixed_columns
+    }
+
+    if fold_columns is None or len(fold_columns) == 0:
+        return {"fold_x": DatasetDict(fixed_ds | other_splits)}
+
+    return {
+        fold: DatasetDict(
+            {
+                _split: ds.filter(
+                    lambda x, k=f"{fold}|{_split}": x.get(k, False),
+                    **desc,
+                )
+                for _split in fold_split_keys
+            }
+            | fixed_ds
+            | other_splits
+        )
+        for fold in fold_columns
+    }
+
+
+@dataclass(frozen=True)
+class SplitInfo:
+    key: str
+    counts: Mapping[str, int]
+    fractions: Mapping[str, float]
+    partition_columns: tuple[str]
+    fixed_columns: tuple[str]
+    fold_columns: tuple[str]
+
+    def to_config(self, path: str | PathLike):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(asdict(self), f, indent=4)
+    
+    @classmethod
+    def from_config(cls, path: str | PathLike | Mapping[str, Any]):
+        if isinstance(path, Mapping):
+            return cls(**path)
+        elif isinstance(path, (str, PathLike)):
+            path = Path(path)
+            with open(path, "r") as f:
+                d = json.load(f)
+            return cls.from_config(d)
+        else:
+            raise ValueError(
+                f"Path must be mapping or str or PathLike, but was {type(path)}: {path}"
+            )
+
 
 class SplitDataset:
 
-    def __init__(self, dataset, *args, **kwargs):
-        if isinstance(dataset, (Dataset, IterableDataset)):
-            self.dataset = DatasetDict({"train": dataset})
-        elif isinstance(dataset, DatasetDict):
-            self.dataset = dataset
+    def __init__(
+        self, 
+        data: DataLike, 
+        *args, 
+        **kwargs
+    ):
+        from providence import DataResolver
+        from datasets import Dataset, DatasetDict, IterableDataset
+        if isinstance(data, DataResolver):
+            resolved = data
+        else:
+            resolved = DataResolver(self._requested_data)
+
+        if isinstance(resolved.data, (Dataset, IterableDataset)):
+            dataset = DatasetDict({"train": resolved.data})
+        elif isinstance(resolved.data, DatasetDict):
+            dataset = resolved.data
+        else:
+            raise ValueError(
+                "Dataset must be Dataset, IterableDataset, or DatasetDict, "
+                f"but was {type(resolved.data)}: {resolved.data}"
+            )
+        
+        self._requested_data = data
+        self.resolved = resolved
+        self.dataset = dataset
+        self.split_info = None
+
+    def save(
+        self,
+        path: str | PathLike,
+        save_source_data: bool = False
+    ):
+        path = Path(path)
+        path.mkdir(parents=True)
+        source_file_exists = (
+            self.resolved.source.uri is not None 
+            and os.path.isfile(self.resolved.source.uri)
+        )
+        reference_only = self.resolved.source.is_remote or source_file_exists
+        self.resolved.save(
+            path / SCHEMA["resolved"],
+            save_source_data=save_source_data or not reference_only,
+        )
+        if self.split_info is not None:
+            if isinstance(self.split_info, SplitInfo):
+                self.split_info.to_config(path / SCHEMA["info"])
+                partition_table = (
+                    self.resolved.data
+                    .select_columns(list(self.split_info.partition_columns))
+                )
+                partition_table.to_parquet(path / SCHEMA["partition_table"])
+            else:
+                raise ValueError(f"Split info is not SplitInfo: {self.split_info}")
+        else:
+            raise ValueError(f"Split info is missing!")  # should never happen
+        with open(path / SCHEMA_FILENAME) as f:
+            json.write(SCHEMA, f)
+        return None
+
+    def write_tables(
+        self,
+        path: str | PathLike,
+        format: str = "parquet"
+    ):
+        from datasets import Dataset, DatasetDict, IterableDataset
+        path = Path(path)
+        if isinstance(self.dataset, DatasetDict):
+            ds = {"fold_x": self.dataset}
+        elif isinstance(self.dataset, (Dataset, IterableDataset)):
+            ds = {"fold_x": DatasetDict({"train": self.dataset})}
+        elif isinstance(self.dataset, Mapping):
+            ds = dict(self.dataset)
+        else:
+            # should never happen
+            raise AttributeError(f"Dataset is not correct! {self.dataset=}")
+        for fold_key, fold in ds.items():
+            fold_dir = path / str(fold_key)
+            fold_dir.mkdir(parents=True, exist_ok=True)
+
+            for key, split_ds in fold.items():
+                split_nrows = dataset_len(split_ds)
+
+                save_dataset(
+                    split_ds, 
+                    fold_dir / f"{key}{format}",
+                )
+        if self.split_info is not None:
+            if isinstance(self.split_info, SplitInfo):
+                self.split_info.to_config(path / SCHEMA["info"])
+            else:
+                raise ValueError(f"Split info is not SplitInfo: {self.split_info}")
+
+        return None            
+
+    @classmethod
+    def load(
+        cls,
+        path: str | PathLike,
+        cache_dir: str
+    ) -> "SplitDataset":
+        from datasets import concatenate_datasets
+        from providence import DataResolver
+        
+        path = Path(path)
+        with open(path / SCHEMA_FILENAME, "r") as f:
+            schema = json.load(f)
+        loaded_schema_version = schema["schema_version"]
+        if loaded_schema_version != SCHEMA_VERSION:
+            raise ValueError(
+                f"Schema mismatch: laoded version {loaded_schema_version} "
+                f"but package on version {SCHEMA_VERSION}"
+            )
+        resolved = DataResolver.load(
+            path / schema[SCHEMA["resolved"]],
+            cache_dir=cache_dir,
+        )
+        info = SplitInfo.from_config(path / schema[SCHEMA["info"]])
+        partition_table = DataResolver(
+            path / schema[SCHEMA["partition_table"]],
+            cache_dir=cache_dir,
+        ).data
+
+        obj = cls(data=resolved)
+        obj.split_info = info
+        other_splits = {k: d for k,d in obj.dataset if k != info.key}
+        
+        split_dataset = _partition_by_bool_column(
+            concatenate_datasets([
+                obj.dataset[info.key],
+                partition_table,
+            ], axis=1),
+            fixed_columns=info.fixed_columns,
+            fold_columns=info.fold_columns,
+            key=info.key,
+        )
+        obj.dataset = split_dataset
+        return obj
 
     def group(
         self,
-        method: Union[str, Callable],
+        method: str | Callable,
         key: str = "train",
         group_column: str = "group",
         batch_size: int = DEFAULT_BATCH_SIZE,
-        preprocess: Optional[Callable] = None,
+        preprocess: Callable | None = None,
         **kwargs
     ) -> 'SplitDataset':
         """Run group annotation over the dataset, returning an annotated copy."""
+        from datasets import Dataset, DatasetDict
+
         if isinstance(method, str):
             method = method.casefold()
             try:
@@ -50,6 +271,7 @@ class SplitDataset:
             )
         
         if method == "faiss" and preprocess is None:
+            from .faiss import add_faiss_index
             preprocess = partial(
                 add_faiss_index,
                 **kwargs
@@ -123,7 +345,6 @@ class SplitDataset:
         self,
         key: str = "train",
         group_column: Iterable[str] = "group",
-        split_column: None = None,
         deterministic: bool = True,
         seed: int = DEFAULT_SEED,
         batch_size: int = DEFAULT_BATCH_SIZE,
@@ -138,6 +359,8 @@ class SplitDataset:
         Existing DatasetDict entries are passed through without re-splitting.
 
         """
+        from datasets import Dataset, DatasetDict
+
         ds = self.dataset[key]
         if not group_column or len(set(group_column)) != len(group_column):
             raise ValueError("Provide distinct grouping columns.")
@@ -192,10 +415,7 @@ class SplitDataset:
             batch_size=batch_size,
             **desc,
         )
-        fixed_ds = {
-            _split: ds.filter(lambda x, k=_split: x[k], **desc)
-            for _split in nonfold_keys
-        }
+        
         if len(fold_keys) > 0:
             split_to_groups, new_fold_keys = self._build_holdout_dict(
                 split_keys=fold_keys,
@@ -203,12 +423,12 @@ class SplitDataset:
                 group_column=group_column,
                 prefix=f"{key}:fold=",
             )
-            fold_key_set = set(fold_keys)
+
             cv_groups = tuple(
                 {
                     group
                     for group, split_name in group_to_split[column].items()
-                    if split_name in fold_key_set
+                    if split_name in set(fold_keys)
                 }
                 for column in group_column
             )
@@ -224,26 +444,10 @@ class SplitDataset:
                 batch_size=batch_size,
                 **desc,
             )
-            return tuple(
-                DatasetDict({
-                    _split: ds.filter(
-                        lambda x, k=f"{_fold}|{_split}": x.get(k, False),
-                        **desc,
-                    )
-                    for _split in (
-                        "train", 
-                        "validation", 
-                        "validation_partial",
-                    )
-                }
-                | fixed_ds
-                | {k: self.dataset[k] for k in self.dataset if k != key})
-                for _fold in new_fold_keys
-            )
         else:
-            return DatasetDict(fixed_ds | {
-                k: self.dataset[k] for k in self.dataset if k != key
-            })
+            new_fold_keys = []
+        
+        return ds, nonfold_keys, new_fold_keys
 
 
     def split(
@@ -256,7 +460,7 @@ class SplitDataset:
         batch_size: int = DEFAULT_BATCH_SIZE,
         splits: Mapping[str, float] | None = None,
         **kwargs
-    ) -> Union[DatasetDict, tuple[DatasetDict, ...]]:
+    ) -> DatasetDict | tuple[DatasetDict, ...]:
 
         """Split a dataset based on grouping.
 
@@ -399,75 +603,58 @@ class SplitDataset:
         ValueError: Provide distinct grouping columns.
 
         """
+        from datasets import DatasetDict
         ds = self.dataset[key]
-        if not isinstance(group_column, str):
-            if isinstance(group_column, (list, tuple)):
-                return self._split_multiway(
-                    key=key,
-                    group_column=tuple(group_column),
-                    split_column=split_column,
-                    deterministic=deterministic,
-                    seed=seed,
-                    batch_size=batch_size,
-                    splits=splits,
-                    **kwargs,
-                )
-            else:
-                raise ValueError(f"Grouping column '{group_column}' must be string or list of strings.")
-        if group_column not in ds.column_names:
-            raise KeyError(f"Grouping column '{group_column}' is not in data.")
+        if isinstance(group_column, str):
+            group_column = (group_column,)
+        elif isinstance(group_column, Iterable):
+            group_column = tuple(group_column)
+        else:
+            raise ValueError(f"Grouping column '{group_column}' must be string or list of strings.")
+        missing_columns = set(group_column) - set(ds.column_names)
+        if len(missing_columns) > 0: 
+            raise KeyError(f"Grouping columns [{missing_columns}] is not in data: {ds.column_names}")
 
-        packed_bins = pack_bins(
-            ds,
+        ds, fixed_columns, fold_columns = self._split_multiway(
+            key=key,
             group_column=group_column,
-            splits=splits,
-            batch_size=batch_size,
             deterministic=deterministic,
             seed=seed,
-        )
-
-        if isinstance(ds, Dataset):
-            desc = {"desc": "Annotating splits"}
-        else:
-            desc = {}
-        ds = ds.map(
-            annotate_split,
-            fn_kwargs={
-                "key_to_split": packed_bins,
-                "group_column": group_column,
-                "split_column": split_column,
-            },
-            batched=True,
             batch_size=batch_size,
-            **desc,
+            splits=splits,
+            **kwargs,
         )
-
-        if isinstance(ds, Dataset):
-            desc = {"desc": "Generating split datasets"}
-        else:
-            desc = {}
-        if splits is None:
-            splits = {}
-        fold_keys = [k for k in splits if ":fold=" in k]
-        nonfold_keys = set(k for k in splits if ":fold=" not in k)
-        fixed_ds = {
-            _split: ds.filter(lambda x, k=_split: x[split_column] == k, **desc)
-            for _split in nonfold_keys
+        split_ds = _partition_by_bool_column(
+            DatasetDict({**self.dataset, key: ds}),
+            fixed_columns=fixed_columns,
+            fold_columns=fold_columns,
+            key=key,
+        )
+        partition_columns = [
+            f"{col}|{split_key}" 
+            for col, datadict in split_ds.items()
+            for split_key in datadict
+            if f"{col}|{split_key}" in ds.column_names
+        ] + fixed_columns
+        split_total = dataset_len(ds)
+        split_counter = {
+            fold_key: {key: dataset_len(d) for key, d in _ds.items()}
+            for fold_key, _ds in split_ds.items()
         }
-        if len(fold_keys) > 0:
-            return tuple(
-                DatasetDict({
-                    "train": ds.filter(lambda x, k=_fold: x[split_column] != k and x[split_column] in fold_keys, **desc),
-                    "validation": ds.filter(lambda x, k=_fold: x[split_column] == k, **desc),
-                }
-                | fixed_ds
-                | {k: self.dataset[k] for k in self.dataset if k != key})
-                for _fold in fold_keys
-            )
-        else:
-            return DatasetDict(fixed_ds | {
-                k: self.dataset[k] for k in self.dataset if k != key
-            })
+        split_fracs = {
+            fold_key: {key: d / split_total for key, d in _ds.items()}
+            for fold_key, _ds in split_counter.items()
+        }
+        split_info = SplitInfo(
+            key=key,
+            counts=split_counter,
+            fractions=split_fracs,
+            partition_columns=tuple(partition_columns),
+            fixed_columns=fixed_columns,
+            fold_columns=fold_columns,
+        )
+        return ds, split_ds, split_info
+
 
     @process_splits
     def group_and_split(
@@ -592,7 +779,7 @@ class SplitDataset:
                 preprocess=preprocess,
                 **kwargs,
             )
-        dataset = self.split(
+        dataset, split_dataset, info = self.split(
             key=key,
             group_column=group_column,
             split_column=split_column,
@@ -602,5 +789,6 @@ class SplitDataset:
             splits=splits,
             **kwargs,
         )
-        self.dataset = dataset
+        self.dataset = split_dataset
+        self.split_info = info
         return self
