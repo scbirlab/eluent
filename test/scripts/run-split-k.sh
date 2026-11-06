@@ -22,5 +22,4 @@ HF_HOME="$CACHE" eluent split \
     -K 5 \
     --seed 42 \
     --cache "$CACHE" \
-    --output "$OUTPUT"/$TYPE.csv \
-    --plot "$OUTPUT"/$TYPE-plot.png
+    --output "$OUTPUT"/$TYPE.csv

@@ -47,7 +47,7 @@ def _partition_by_bool_column(
     desc = {"desc": "Generating split datasets"} if isinstance(ds, Dataset) else {}
     other_splits = {k: d for k, d in dataset.items() if k != key}
     fixed_columns = list(fixed_columns)
-    fold_columns = list(fold_columns)
+    fold_columns = list(fold_columns or ())
 
     fixed_ds = {
         _split: ds.filter(lambda x, k=_split: x[k], **desc)
@@ -117,7 +117,7 @@ class SplitDataset:
         if isinstance(data, DataResolver):
             resolved = data
         else:
-            resolved = DataResolver(self._requested_data)
+            resolved = DataResolver(data)
 
         if isinstance(resolved.data, (Dataset, IterableDataset)):
             dataset = DatasetDict({"train": resolved.data})
@@ -155,7 +155,7 @@ class SplitDataset:
             if isinstance(self.split_info, SplitInfo):
                 self.split_info.to_config(path / SCHEMA["info"])
                 partition_table = (
-                    self.dataset
+                    self.dataset[self.split_info.key]
                     .select_columns(list(self.split_info.partition_columns))
                 )
                 partition_table.to_parquet(path / SCHEMA["partition_table"])
@@ -193,7 +193,7 @@ class SplitDataset:
 
                 save_dataset(
                     split_ds, 
-                    fold_dir / f"{key}{format}",
+                    fold_dir / f"{key}.{format}",
                 )
         if self.split_info is not None:
             if isinstance(self.split_info, SplitInfo):
@@ -482,6 +482,7 @@ class SplitDataset:
         Construct every combination of four groups on three axes.
 
         >>> from itertools import combinations, product
+        >>> from datasets import Dataset, DatasetDict
         >>> axes = ("scaffold", "taxon", "target")
         >>> rows = list(product(range(4), repeat=3))
         >>> data = Dataset.from_dict({
@@ -494,12 +495,13 @@ class SplitDataset:
 
         Ordinary splits retain intersections and exclude mixed assignments.
 
-        >>> parts = SplitDataset(data).split(
+        >>> _, parts, info = SplitDataset(data).split(
         ...     group_column=axes,
         ...     splits={"train": 0.5, "test": 0.5},
         ... )
-        >>> sorted(parts)
+        >>> sorted(parts["fold_x"])
         ['test', 'train']
+        >>> parts = parts["fold_x"]
         >>> len(parts["train"]), len(parts["test"])
         (8, 8)
         >>> all(
@@ -510,7 +512,7 @@ class SplitDataset:
 
         Three CV folds across three axes produce 27 evaluations.
 
-        >>> folds = SplitDataset(data).split(
+        >>> _, folds, info = SplitDataset(data).split(
         ...     group_column=axes,
         ...     splits={
         ...         "train:fold=0": 0.25,
@@ -519,6 +521,7 @@ class SplitDataset:
         ...         "test": 0.25,
         ...     },
         ... )
+        >>> folds = list(folds.values())
         >>> len(folds)
         27
         >>> all(
@@ -590,11 +593,11 @@ class SplitDataset:
         Unrelated DatasetDict entries pass through.
 
         >>> source = DatasetDict({"train": data, "external": data.select([0])})
-        >>> parts = SplitDataset(source).split(
+        >>> _, parts, _ = SplitDataset(source).split(
         ...     group_column=axes,
         ...     splits={"train": 0.5, "test": 0.5},
         ... )
-        >>> list(parts["external"]["id"])
+        >>> list(parts["fold_x"]["external"]["id"])
         [0]
 
         Duplicate grouping axes are rejected.
@@ -705,14 +708,13 @@ class SplitDataset:
         ... )
         >>> result is splitter
         True
-        >>> sorted(result.dataset)
+        >>> parts = result.split_dataset["fold_x"]
+        >>> sorted(parts)
         ['test', 'train']
-        >>> len(result.dataset["train"]), len(result.dataset["test"])
+        >>> len(parts["train"]), len(parts["test"])
         (8, 8)
         >>> all(
-        ...     set(result.dataset["train"][axis]).isdisjoint(
-        ...         result.dataset["test"][axis]
-        ...     )
+        ...     set(parts["train"][axis]).isdisjoint(parts["test"][axis])
         ...     for axis in axes
         ... )
         True
@@ -724,9 +726,10 @@ class SplitDataset:
         ...     group_column=axes,
         ...     train=0.5,
         ... )
-        >>> sorted(result.dataset)
+        >>> parts = result.split_dataset["fold_x"]
+        >>> sorted(parts)
         ['train', 'validation']
-        >>> len(result.dataset["train"]), len(result.dataset["validation"])
+        >>> len(parts["train"]), len(parts["validation"])
         (8, 8)
 
         Three folds on each of three axes produce 27 evaluations.
@@ -739,11 +742,12 @@ class SplitDataset:
         ...     test=0.25,
         ...     kfolds=3,
         ... )
-        >>> isinstance(result.dataset, tuple), len(result.dataset)
-        (True, 27)
+        >>> folds = list(result.split_dataset.values())
+        >>> len(folds)
+        27
         >>> all(
         ...     set(fold) == {"train", "validation", "validation_partial", "test"}
-        ...     for fold in result.dataset
+        ...     for fold in folds
         ... )
         True
         >>> all(
@@ -753,7 +757,7 @@ class SplitDataset:
         ...         len(fold["validation_partial"]),
         ...         len(fold["test"]),
         ...     ) == (8, 1, 18, 1)
-        ...     for fold in result.dataset
+        ...     for fold in folds
         ... )
         True
 
@@ -765,16 +769,18 @@ class SplitDataset:
         ...     test=0.5,
         ...     seed=42,
         ... )
-        >>> sorted(result.dataset)
+        >>> parts = result.split_dataset["fold_x"]
+        >>> sorted(parts)
         ['test', 'train']
-        >>> all("group" in part.column_names for part in result.dataset.values())
+        >>> all("group" in part.column_names for part in parts.values())
         True
-        >>> train_ids = set(result.dataset["train"]["id"])
-        >>> test_ids = set(result.dataset["test"]["id"])
+        >>> train_ids = set(parts["train"]["id"])
+        >>> test_ids = set(parts["test"]["id"])
         >>> train_ids.isdisjoint(test_ids)
         True
         >>> train_ids | test_ids == set(data["id"])
         True
+        
         """
         if method is not None:
             self.dataset = self.group(
@@ -795,7 +801,10 @@ class SplitDataset:
             splits=splits,
             **kwargs,
         )
-        self.dataset = dataset
+        self.dataset = DatasetDict({
+            **self.dataset,
+            key: dataset,
+        })
         self.split_dataset = split_dataset
         self.split_info = info
         return self

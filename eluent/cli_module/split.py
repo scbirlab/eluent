@@ -201,5 +201,3 @@ def _plot(args: Namespace) -> None:
         _figsaver(fig, plot_root, df=df)
 
     return None
-
-
