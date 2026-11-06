@@ -139,6 +139,13 @@ def main() -> None:
         default=[5.],
         help='List of percentiles to calculate.',
     )
+    plot_mode = CLIOption(
+        '--mode', '-m', 
+        type=str,
+        choices=["percentiles", "split"],
+        default="split",
+        help='What type of plot to make.',
+    )
     reverse = CLIOption(
         '--reverse', '-r', 
         action='store_true',
@@ -208,7 +215,8 @@ def main() -> None:
         description="Visualize chemical splits.",
         options=[
             input_filename, 
-            output_name,
+            output_name.replace(required=True),
+            plot_mode,
             structure_col,
             structure_representation,
             plot_sample,
@@ -224,6 +232,7 @@ def main() -> None:
         description="Add columns indicating whether rows are in a percentile.",
         options=[
             input_filename, 
+            output_name.replace(required=True),
             columns,
             percentiles,
             reverse,
@@ -232,7 +241,6 @@ def main() -> None:
             slice_start,
             slice_end,
             cache,
-            output_name.replace(required=True),
             batch_size,
             structure_col,
             structure_representation,

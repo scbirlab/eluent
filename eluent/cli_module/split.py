@@ -126,58 +126,82 @@ def _plot(args: Namespace) -> None:
 
     cache, _, _ = configure_hf_cache(args.cache)
 
-    from ..utils.splitting import SplitDataset
+    from carabiner.mpl import figsaver
+    from ..utils.splitting.plot import plot_chemical_splits
 
-    ds = SplitDataset.load(
-        args.input_file,
-        cache_dir=args.cache,
+    plot_outdir = os.path.dirname(args.output)
+    if len(plot_outdir) > 0:
+        os.makedirs(plot_outdir, exist_ok=True)
+    plot_root, ext = os.path.splitext(os.path.basename(args.output))
+    _figsaver = figsaver(
+        format=ext.lstrip("."), 
     )
 
-    if args.output is not None and args.structure is not None:
-        from carabiner.mpl import figsaver
-        from datasets import concatenate_datasets
-        from ..utils.splitting.plot import plot_chemical_splits
-        
-        plot_outdir = os.path.dirname(args.output)
-        if len(plot_outdir) > 0:
-            os.makedirs(plot_outdir, exist_ok=True)
-        plot_root, ext = os.path.splitext(os.path.basename(args.output))
-        _figsaver = figsaver(
-            format=ext.lstrip("."), 
+    if args.mode == "split":
+        from ..utils.splitting import SplitDataset
+        ds = SplitDataset.load(
+            args.input_file,
+            cache_dir=args.cache,
         )
 
-        for split_key, _ds in ds.split_dataset.items():
-            if _ds is None or len(_ds) == 0:
-                continue
-            n_rows = [d.num_rows for _, d in _ds.items()]
-            if any(n > 1_000_000 for n in n_rows):
-                print_err(
-                    f"[WARN] Skipping {split_key} plots, too many rows: {n_rows}"
+        if args.structure is not None:
+            from datasets import concatenate_datasets
+            for split_key, _ds in ds.split_dataset.items():
+                if _ds is None or len(_ds) == 0:
+                    continue
+                n_rows = [d.num_rows for _, d in _ds.items()]
+                if any(n > 1_000_000 for n in n_rows):
+                    print_err(
+                        f"[WARN] Skipping {split_key} plots, too many rows: {n_rows}"
+                    )
+                    continue
+                print_err(f"Plotting splits from {split_key}: {_ds}")
+                _ds = concatenate_datasets([
+                    d.map(
+                        lambda x, c=k: x | {"split": k},
+                    ) for k, d in _ds.items()
+                ])
+                (fig, axes), df = plot_chemical_splits(
+                    ds=_ds,
+                    structure_column=args.structure,
+                    input_representation=args.input_representation,
+                    split_columns="split",
+                    sample_size=args.plot_sample,
+                    additional_columns=args.extras,
+                    seed=args.seed,
+                    cache=cache,
                 )
-                continue
-            print_err(f"Plotting splits from {split_key}: {_ds}")
-            _ds = concatenate_datasets([
-                d.map(
-                    lambda x, c=k: x | {"split": k},
-                ) for k, d in _ds.items()
-            ])
-            (fig, axes), df = plot_chemical_splits(
-                ds=_ds,
-                structure_column=args.structure,
-                input_representation=args.input_representation,
-                split_columns="split",
-                sample_size=args.plot_sample,
-                additional_columns=args.extras,
-                seed=args.seed,
-                cache=cache,
-            )
-            _figsaver(
-                fig, 
-                os.path.join(
-                    plot_outdir, 
-                    f"{plot_root}-{split_key}"), 
-                    df=df,
+                _figsaver(
+                    fig, 
+                    os.path.join(
+                        plot_outdir, 
+                        f"{plot_root}-{split_key}"), 
+                        df=df,
+                    )
+    elif args.mode == "percentiles":
+        ds = DataResolver(
+            args.input_file, 
+            cache_dir=cache,
+        )
+
+        (fig, axes), df = plot_chemical_splits(
+            ds=ds.data,
+            structure_column=args.structure,
+            input_representation=args.input_representation,
+            split_columns=[
+                col for col in ds.column_names 
+                if any(
+                    f"{_q}_top_" in col 
+                    for _q in q
                 )
+            ],
+            sample_size=args.plot_sample,
+            additional_columns=args.extras,
+            seed=args.plot_seed,
+            cache=cache,
+        )
+        root, ext = os.path.splitext(args.plot)
+        _figsaver(fig, root, df=df)
 
     return None
 
