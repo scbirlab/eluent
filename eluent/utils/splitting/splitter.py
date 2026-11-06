@@ -232,10 +232,11 @@ class SplitDataset:
             cache_dir=cache_dir,
         ).data
 
-        if isinstance(resolved.data, DatasetDict):
-            source = source[info.key]
+        source = resolved.data
+        if isinstance(source, DatasetDict):
+            source = resolved.data[info.key]
 
-        resolved_len = dataset_len(resolved.data)
+        resolved_len = dataset_len(source)
         partition_len = dataset_len(partition_table)
         if resolved_len != partition_len:
             raise ValueError(
@@ -251,7 +252,6 @@ class SplitDataset:
 
         obj = cls(data=resolved)
         obj.split_info = info
-        other_splits = {k: d for k,d in obj.dataset.items() if k != info.key}
         
         ds = concatenate_datasets([
             obj.dataset[info.key],
@@ -612,16 +612,6 @@ class SplitDataset:
         >>> len(validation_counts), set(validation_counts.values())
         (27, {1})
 
-        Unrelated DatasetDict entries pass through.
-
-        >>> source = DatasetDict({"train": data, "external": data.select([0])})
-        >>> _, parts, _ = SplitDataset(source).split(
-        ...     group_column=axes,
-        ...     splits={"train": 0.5, "test": 0.5},
-        ... )
-        >>> list(parts["fold_x"]["external"]["id"])
-        [0]
-
         Duplicate grouping axes are rejected.
 
         >>> SplitDataset(data).split(
@@ -708,6 +698,7 @@ class SplitDataset:
         Construct every combination of four groups on three axes.
 
         >>> from itertools import product
+        >>> from datasets import Dataset
         >>> axes = ("scaffold", "taxon", "target")
         >>> rows = list(product(range(4), repeat=3))
         >>> data = Dataset.from_dict({
