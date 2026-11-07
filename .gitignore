@@ -6,7 +6,7 @@ Hello.txt
 .DS_Store
 .mypy_cache/
 .pytest_cache/
-/cache
+cache/
 /docs/build
 /docs/_autosummary
 /duvida/data/modelbox-names.json

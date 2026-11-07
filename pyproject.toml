@@ -1,6 +1,6 @@
 [project]
 name = "eluent"
-version = "0.0.5"
+version = "0.0.6"
 authors = [
   { name="Eachan Johnson", email="eachan.johnson@crick.ac.uk" },
 ]
@@ -40,8 +40,7 @@ dependencies = [
   "huggingface_hub",
   "numpy",
   "platformdirs>=4.4.0",
-  "providence>=0.0.1",
-  "scipy",
+  "providence>=0.0.2",
   "tqdm",
   "umap-learn", 
   "scipy", 
