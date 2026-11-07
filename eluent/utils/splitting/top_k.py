@@ -27,7 +27,7 @@ def get_percentile(
     reverse: bool = False,
     delta: float = 1.,
     batch_size: int = 1024,
-    cache: str | None = None
+    cache_dir: str | None = None
 ):
     from datasets import Dataset, IterableDataset, concatenate_datasets
     if not reverse:
@@ -72,7 +72,7 @@ def get_percentile(
         desc = {"desc": "Tagging borderline"}
     else:
         desc = {}
-    to_dataset_p = partial(to_dataset, batch_size=batch_size, cache=cache)
+    to_dataset_p = partial(to_dataset, batch_size=batch_size, cache_dir=cache_dir)
     maybes = to_dataset_p(ds_tfm[0], nrows=dataset_len(ds_tfm[0])).sort(column, reverse=not reverse)
 
     print_err(f"Confidently tagged {n_definitely_true} {column=}, {p=}; need {n_required_from_maybe} / {maybes.num_rows} to make {k} total.")
@@ -107,7 +107,7 @@ def percentiles(
     delta: float = .01,
     reverse: bool = False,
     batch_size: int = 1024,
-    cache: str | None = None
+    cache_dir: str | None = None
 ):
     """Tag rows in the top (or bottom) percentiles of columns, out-of-core.
 
@@ -155,7 +155,7 @@ def percentiles(
                 delta=delta,
                 batch_size=batch_size,
                 reverse=reverse,
-                cache=cache,
+                cache_dir=cache_dir,
             )
     if isinstance(input_ds, Dataset):
         return ds

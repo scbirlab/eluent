@@ -31,11 +31,10 @@ def add_faiss_index(
     import os
 
     from filelock import FileLock
+    from providence.package_data import configure_hf_cache
+    from providence.io import hasher, _lock_path
 
-    from ..datasets_io import hasher, _lock_path
-    from ..package_data import resolve_cache
-
-    cache = resolve_cache(cache)
+    cache, *_ = configure_hf_cache(cache)
     ds_fingerprint = ds._fingerprint
     cache_key = "::".join([
         f"faiss-components-v{FAISS_COMPONENT_CACHE_VERSION}",

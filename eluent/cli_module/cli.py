@@ -9,7 +9,7 @@ from carabiner.cliutils import CLIOption, CLICommand, CLIApp
 from .. import app_name, __version__
 
 from .percentile import _percentile
-from .split import _split
+from .split import _split, _write, _plot
 
 
 def main() -> None:
@@ -54,17 +54,23 @@ def main() -> None:
         default=16,
         help='Batch size for training.',
     )
+    checkpoint = CLIOption(
+        '--checkpoint', '-c', 
+        type=str,
+        default=None,
+        help='Checkpoint directory.',
+    )
     output_name = CLIOption(
         '--output', '-o', 
         type=str,
-        required=True,
+        default=None,
         help='Output filename.',
     )
     # slice dataset
     slice_start = CLIOption(
         '--start', 
         type=int,
-        default=0,
+        default=None,
         help='First row of dataset to process.',
     )
     slice_end = CLIOption(
@@ -114,6 +120,11 @@ def main() -> None:
         default=1,
         help='Number of folds to generate training and validation. Overrides validation fraction, takes only training fraction.',
     )
+    force_write_data = CLIOption(
+        '--force_write_data', '-f', 
+        action='store_true',
+        help='Whether to save data, if remote.',
+    )
 
     columns = CLIOption(
         '--columns', '-c',
@@ -128,16 +139,17 @@ def main() -> None:
         default=[5.],
         help='List of percentiles to calculate.',
     )
+    plot_mode = CLIOption(
+        '--mode', '-m', 
+        type=str,
+        choices=["percentiles", "split"],
+        default="split",
+        help='What type of plot to make.',
+    )
     reverse = CLIOption(
         '--reverse', '-r', 
         action='store_true',
         help='Whether to reverse percentiles (i.e. high to low).',
-    )
-    do_plot = CLIOption(
-        '--plot', 
-        type=str,
-        default=None,
-        help='Filename to save UMAP plot under.',
     )
     compression = CLIOption(
         '--compression', '-z', 
@@ -150,12 +162,6 @@ def main() -> None:
         type=float,
         default=1.,
         help='Width from percentile cutoff to buffer as borderline for refinement. Higher is more accurate, but uses more memory.',
-    )
-    plot_seed = CLIOption(
-        '--plot-seed', '-e', 
-        type=int,
-        default=42,
-        help='Seed for UMAP embedding.',
     )
     plot_sample = CLIOption(
         '--plot-sample', '-n', 
@@ -176,23 +182,49 @@ def main() -> None:
         options=[
             input_filename, 
             split_type,
+            kfolds,
             group_columns,
-            n_neighbors,
+            output_name,
+            checkpoint,
+            force_write_data,
             slice_start,
             slice_end,
             structure_col,
             structure_representation,
-            do_plot,
+            random_seed,
+            cache,
+            batch_size,
+            n_neighbors,
+        ] + train_test_val,
+        main=_split,
+    )
+
+    load_chk = CLICommand(
+        "write",
+        description="Write a split checkpoint to tables.",
+        options=[
+            input_filename, 
+            output_name,
+            cache,
+        ],
+        main=_write,
+    )
+
+    plot_cmd = CLICommand(
+        "plot",
+        description="Visualize chemical splits.",
+        options=[
+            input_filename, 
+            output_name.replace(required=True),
+            plot_mode,
+            structure_col,
+            structure_representation,
             plot_sample,
-            plot_seed,
             extras,
             random_seed,
             cache,
-            output_name,
-            batch_size,
-            kfolds,
-        ] + train_test_val,
-        main=_split,
+        ],
+        main=_plot,
     )
 
     percentiles = CLICommand(
@@ -200,6 +232,7 @@ def main() -> None:
         description="Add columns indicating whether rows are in a percentile.",
         options=[
             input_filename, 
+            output_name.replace(required=True),
             columns,
             percentiles,
             reverse,
@@ -208,14 +241,9 @@ def main() -> None:
             slice_start,
             slice_end,
             cache,
-            output_name,
             batch_size,
-            do_plot,
             structure_col,
             structure_representation,
-            plot_sample,
-            plot_seed,
-            extras,
         ],
         main=_percentile,
     )
@@ -228,7 +256,9 @@ def main() -> None:
         ),
         commands=[
             split,
+            load_chk,
             percentiles,
+            plot_cmd,
         ],
     )
 
