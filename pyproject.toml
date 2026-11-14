@@ -44,7 +44,7 @@ dependencies = [
   "tqdm",
   "umap-learn", 
   "scipy", 
-  "schemist>=0.0.7", 
+  "schemist>=0.1.2", 
   "tdigest>=0.5", 
   "faiss-cpu>=1.11",
   "filelock>=3.31.0",
