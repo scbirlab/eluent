@@ -842,9 +842,38 @@ class SplitDataset:
         """
         from datasets import DatasetDict
         if method is not None:
+            # When group_column is a list/tuple, the method writes into
+            # group_column[0] only; the remaining columns are pre-existing axes
+            # used in the subsequent multiway split.  E.g. method="scaffold",
+            # group_column=["scaffold_grp", "species"] generates scaffold groups
+            # into "scaffold_grp" and then splits on both axes.
+            if isinstance(group_column, str):
+                generated_column = group_column
+            elif isinstance(group_column, (list, tuple)):
+                if not group_column:
+                    raise ValueError("group_column must not be empty.")
+                if len(group_column) != len(set(group_column)):
+                    raise ValueError(
+                        f"group_column contains duplicate column names: {list(group_column)}."
+                    )
+                generated_column = group_column[0]
+                # Secondary axes must already exist in the dataset.
+                existing = set(self.dataset[key].column_names)
+                missing = [c for c in group_column[1:] if c not in existing]
+                if missing:
+                    raise ValueError(
+                        f"Secondary grouping columns {missing} not found in "
+                        f"split '{key}'.  These must already exist when "
+                        "method is not None."
+                    )
+            else:
+                raise TypeError(
+                    f"group_column must be a string, list, or tuple; "
+                    f"got {type(group_column).__name__}."
+                )
             self.dataset = self.group(
                 key=key,
-                group_column=group_column,
+                group_column=generated_column,
                 method=method,
                 batch_size=batch_size,
                 preprocess=preprocess,
