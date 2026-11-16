@@ -20,11 +20,13 @@ else:
 from .decorators import process_splits
 from .bin_packing import pack_bins
 from .grouping import GROUPING_FUNCTIONS, annotate_split, annotate_split_invert, annotate_split_invert_fixed
-from .utils import dataset_len, save_dataset
+from .utils import check_new_columns, dataset_len, save_dataset, validate_split_fractions
 
 DEFAULT_BATCH_SIZE: int = 1024
 DEFAULT_SEED: int = 42
-SCHEMA_VERSION: int = 1
+# schema.json records `partition_checksum`, the SHA-256 of the partition
+# table, which is row-aligned with the source by position.
+SCHEMA_VERSION: int = 2
 SCHEMA: dict[str, str | int] = {
     "schema_version": SCHEMA_VERSION,
     "info": "info.json",
@@ -163,8 +165,12 @@ class SplitDataset:
                 raise ValueError(f"Split info is not SplitInfo: {self.split_info}")
         else:
             raise ValueError(f"Split info is missing!")  # should never happen
+        from providence.io import file_checksum
+        schema = SCHEMA | {
+            "partition_checksum": file_checksum(path / SCHEMA["partition_table"]),
+        }
         with open(path / SCHEMA_FILENAME, "w") as f:
-            json.dump(SCHEMA, f, indent=4)
+            json.dump(schema, f, indent=4)
         return None
 
     def write_tables(
@@ -212,6 +218,7 @@ class SplitDataset:
     ) -> "SplitDataset":
         from datasets import concatenate_datasets, DatasetDict
         from providence import DataResolver
+        from providence.io import file_checksum
         
         path = Path(path)
         with open(path / SCHEMA_FILENAME, "r") as f:
@@ -221,6 +228,15 @@ class SplitDataset:
             raise ValueError(
                 f"Schema mismatch: laoded version {loaded_schema_version} "
                 f"but package on version {SCHEMA_VERSION}"
+            )
+        partition_file = path / schema["partition_table"]
+        checksum = file_checksum(partition_file)
+        if checksum != schema["partition_checksum"]:
+            raise ValueError(
+                f"Partition table {partition_file} has changed since the "
+                "checkpoint was saved, so its rows may no longer match the "
+                f"source data: checksum {checksum} != recorded "
+                f"{schema['partition_checksum']}."
             )
         resolved = DataResolver.load(
             path / schema["resolved"],
@@ -305,6 +321,7 @@ class SplitDataset:
             )
 
         ds = self.dataset[key]
+        check_new_columns(ds.column_names, [group_column], "group")
         if preprocess is not None and isinstance(preprocess, Callable):
             ds, info = preprocess(ds)
         else:
@@ -396,10 +413,9 @@ class SplitDataset:
             if column not in ds.column_names:
                 raise KeyError(f"Grouping column '{column}' is not in data: {ds.column_names}.")
         
-        if not splits or any([
-            any(not isfinite(v) or v < 0. for v in splits.values()),
-            sum(splits.values()) <= 0,
-        ]):
+        if splits:
+            validate_split_fractions(splits)
+        if not splits or sum(splits.values()) <= 0:
             raise ValueError(
                 "Provide nonnegative split fractions with a positive total. "
                 f"Received: {splits}"
@@ -428,6 +444,25 @@ class SplitDataset:
             group_column=group_column,
             fixed=True,
         )
+        if len(fold_keys) > 0:
+            split_to_groups, new_fold_keys = self._build_holdout_dict(
+                split_keys=fold_keys,
+                group_to_split=group_to_split,
+                group_column=group_column,
+                prefix=f"{key}:fold=",
+            )
+        else:
+            split_to_groups, new_fold_keys = {}, []
+        check_new_columns(
+            ds.column_names,
+            list(split_to_groups_fixed) + [
+                f"{fold_name}|{split_key}"
+                for fold_name in split_to_groups
+                for split_key in ("train", "validation", "validation_partial")
+            ],
+            "partition",
+        )
+
         if isinstance(ds, Dataset):
             desc = {"desc": "Annotating splits"}
         else:
@@ -444,13 +479,6 @@ class SplitDataset:
         )
         
         if len(fold_keys) > 0:
-            split_to_groups, new_fold_keys = self._build_holdout_dict(
-                split_keys=fold_keys,
-                group_to_split=group_to_split,
-                group_column=group_column,
-                prefix=f"{key}:fold=",
-            )
-
             cv_groups = tuple(
                 {
                     group
@@ -471,8 +499,6 @@ class SplitDataset:
                 batch_size=batch_size,
                 **desc,
             )
-        else:
-            new_fold_keys = []
         
         return ds, nonfold_keys, new_fold_keys
 
@@ -665,6 +691,21 @@ class SplitDataset:
             fold_key: {key: d / split_total for key, d in _ds.items()}
             for fold_key, _ds in split_counter.items()
         }
+        # Packing checks each axis; intersecting several axes can still
+        # leave a partition empty. `validation_partial` is a by-product of
+        # multi-axis k-fold, not a requested partition.
+        empty = [
+            f"{fold_key}/{split_key}"
+            for fold_key, counts in split_counter.items()
+            for split_key, count in counts.items()
+            if count == 0 and split_key != "validation_partial"
+        ]
+        if empty:
+            raise ValueError(
+                f"Partitions {empty} are empty after combining group "
+                f"assignments on {list(group_column)} with fractions {splits}. "
+                f"Counts: {split_counter}"
+            )
         split_info = SplitInfo(
             key=key,
             counts=split_counter,
@@ -689,9 +730,16 @@ class SplitDataset:
         batch_size: int = DEFAULT_BATCH_SIZE,
         splits: Mapping[str, float] | None = None,
         preprocess: Callable | None = None,
+        generated_column: str = "group",
         **kwargs
     ):
         """Annotate groups when requested, split the data, and return self.
+
+        With `method`, groups are generated: into `group_column` if it is a
+        string (and `generated_column` is ignored); otherwise into
+        `generated_column`, with the listed columns as further, existing axes.
+        For example, `method="scaffold"` with `group_column=["species",
+        "assay"]` splits on scaffold, species and assay groups.
 
         Examples
         ========
@@ -797,9 +845,41 @@ class SplitDataset:
         """
         from datasets import DatasetDict
         if method is not None:
+            # A string names the column the method writes. A list or tuple
+            # names existing axes; the method writes `generated_column`, which
+            # becomes the first axis of the multiway split.
+            if isinstance(group_column, str):
+                generated_column = group_column
+            elif isinstance(group_column, (list, tuple)):
+                if not group_column:
+                    raise ValueError("group_column must not be empty.")
+                if len(group_column) != len(set(group_column)):
+                    raise ValueError(
+                        f"group_column contains duplicate column names: {list(group_column)}."
+                    )
+                if generated_column in group_column:
+                    raise ValueError(
+                        f"generated_column '{generated_column}' is also listed in "
+                        f"group_column {list(group_column)}; list only existing "
+                        "axes, or choose another generated_column."
+                    )
+                existing = set(self.dataset[key].column_names)
+                missing = [c for c in group_column if c not in existing]
+                if missing:
+                    raise ValueError(
+                        f"Grouping columns {missing} not found in split '{key}'. "
+                        "With a method, listed columns must already exist; "
+                        f"generated groups go in generated_column='{generated_column}'."
+                    )
+                group_column = [generated_column, *group_column]
+            else:
+                raise TypeError(
+                    f"group_column must be a string, list, or tuple; "
+                    f"got {type(group_column).__name__}."
+                )
             self.dataset = self.group(
                 key=key,
-                group_column=group_column,
+                group_column=generated_column,
                 method=method,
                 batch_size=batch_size,
                 preprocess=preprocess,

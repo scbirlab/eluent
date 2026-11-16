@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from collections import Counter
+import warnings
 
 from carabiner import print_err
 from datasets import Dataset, IterableDataset
@@ -104,6 +105,14 @@ def pack_bins(
     >>> g2s['A']   # largest group goes to train
     'train'
 
+    A requested partition that receives no groups is an error.
+
+    >>> ds = Dataset.from_dict({"group": ['A'] * 6 + ['B'] * 3 + ['C']})
+    >>> pack_bins(ds, group_column="group", splits={'train': 0.95, 'test': 0.05})
+    Traceback (most recent call last):
+        ...
+    ValueError: Partition 'test' was requested with fraction 0.05 but is empty after packing 3 groups from column 'group'...
+
     """
     rng = np.random.default_rng(seed=seed)
     if num_rows is None:
@@ -145,5 +154,26 @@ def pack_bins(
             group_to_split=group_to_split,
             rng=rng,
         )
+
+    packed_rows = Counter()
+    for group, split_name in group_to_split.items():
+        packed_rows[split_name] += sizes[group]
+    for split_name, fraction in splits.items():
+        if fraction <= 0.:
+            continue
+        if packed_rows[split_name] == 0:
+            raise ValueError(
+                f"Partition '{split_name}' was requested with fraction {fraction:.4g} "
+                f"but is empty after packing {len(sizes)} groups from column "
+                f"'{group_column}'. Groups are indivisible: use finer groups "
+                "or a larger fraction."
+            )
+        if packed_rows[split_name] < 0.5 * fraction * num_rows:
+            warnings.warn(
+                f"Partition '{split_name}' has {packed_rows[split_name]} rows, "
+                f"less than half of the requested fraction {fraction:.4g} of "
+                f"{num_rows} rows, after packing {len(sizes)} groups from "
+                f"column '{group_column}'."
+            )
             
     return group_to_split

@@ -83,15 +83,15 @@ def main() -> None:
     split_type = CLIOption(
         '--type', 
         type=str,
-        default="scaffold",
+        default=None,
         choices=["random", "scaffold", "faiss"],
-        help='Splitting method.',
+        help='Splitting method, writing groups to a "group" column. Default: scaffold, unless --group-columns is given.',
     )
     group_columns = CLIOption(
         '--group-columns',
         nargs='+',
         default=None,
-        help='Existing group columns, in axis order. Overrides --type.',
+        help='Existing group columns, in axis order. With --type, the generated groups are an extra, first axis.',
     )
     random_seed = CLIOption(
         '--seed', '-i', 
