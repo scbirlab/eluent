@@ -202,9 +202,9 @@ Commands accept `--cache` where applicable. Cache configuration is delegated to 
 
 ### Dataset splitting
 
-Eluent assigns groups to partitions using bin packing. Requested split fractions are targets; achieved fractions depend on the number and size of groups.
+Eluent assigns groups to partitions using bin packing. Requested split fractions are targets; achieved fractions depend on the number and size of groups. A partition requested with a non-zero fraction that receives no groups is an error, and one with less than half its requested rows gives a warning. A partition left empty after combining several grouping axes is also an error. Eluent never overwrites input columns: if the input already has a column named like a requested partition (e.g. `test`), or `group` when `--type` generates groups, splitting stops with an error naming the clash.
 
-Specify at least `--train`. For ordinary partitioning, omitting `--validation` and `--test` infers the remaining fractions. Explicit zero fractions are respected.
+Specify at least `--train`. For ordinary partitioning, omitting `--validation` and `--test` infers the remaining fractions. Explicit zero fractions are respected. Fractions must be between 0 and 1, and explicit fractions must not sum to more than 1. With `--kfolds`, `--train` is the cross-validation pool, so `--train` plus `--test` must not exceed 1.
 
 Omitting `--seed` uses deterministic bin packing. Supplying `--seed` enables reproducible randomized packing; different seeds may produce different assignments.
 
@@ -330,7 +330,7 @@ The full training and validation sets are group-disjoint on every axis. Partial 
 
 ### Split checkpoints
 
-A split checkpoint stores a reproducible partition definition independently of its exported tables.
+A split checkpoint stores a reproducible partition definition independently of its exported tables. The partition table is checksummed, so a modified table is rejected on load.
 
 ```bash
 eluent split molecules.csv \

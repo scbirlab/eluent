@@ -99,7 +99,7 @@ def test_checkpoint_rejects_length_mismatch(tmp_path, source_file):
     partition = partition.select(range(len(partition) - 1))
     partition.to_parquet(str(partition_path))
 
-    with pytest.raises(ValueError, match="partition length"):
+    with pytest.raises(ValueError, match="has changed"):
         SplitDataset.load(
             checkpoint,
             cache_dir=str(tmp_path / "cache"),

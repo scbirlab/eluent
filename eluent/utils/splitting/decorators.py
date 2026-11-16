@@ -5,6 +5,8 @@ from functools import wraps
 
 from carabiner import pprint_dict, print_err
 
+from .utils import validate_split_fractions
+
 def process_splits(fn: Callable):
 
     """Decorator to allow splitting functions to infer full 3-way split fractions.
@@ -36,6 +38,29 @@ def process_splits(fn: Callable):
     >>> abs(result['validation'] - 0.1) < 1e-9
     True
 
+    Explicit fractions are validated before inference.
+
+    >>> _echo(train=0.9, test=0.3)
+    Traceback (most recent call last):
+        ...
+    ValueError: Split fractions sum to 1.2, which is more than 1: {'train': 0.9, 'test': 0.3}
+    >>> _echo(train=0.7, validation=0.3, test=-0.1)
+    Traceback (most recent call last):
+        ...
+    ValueError: Split fractions must be finite and between 0 and 1. Received: {'test': -0.1}
+    >>> _echo(train=0.8, test=0.3, kfolds=4)  # train is the cross-validation pool
+    Traceback (most recent call last):
+        ...
+    ValueError: Split fractions sum to 1.1, which is more than 1: {'train': 0.8, 'test': 0.3}
+    >>> _echo(train=0.8, kfolds=0)
+    Traceback (most recent call last):
+        ...
+    ValueError: kfolds must be a positive integer, but was 0.
+    >>> _echo(train=0., validation=0., test=0.)
+    Traceback (most recent call last):
+        ...
+    ValueError: Split fractions must have a positive total: {'train': 0.0}
+
     """
 
     @wraps(fn)
@@ -48,6 +73,14 @@ def process_splits(fn: Callable):
         splits: Optional[Mapping[str, float]] = None,
         **kwargs
     ) -> Callable:
+        if isinstance(kfolds, bool) or not isinstance(kfolds, int) or kfolds < 1:
+            raise ValueError(f"kfolds must be a positive integer, but was {kfolds}.")
+        # With k folds, validation is ignored and train is the CV pool.
+        validate_split_fractions(
+            {"train": train, "test": test}
+            | ({"validation": validation} if kfolds == 1 else {})
+            | dict(splits or {})
+        )
         if kfolds == 1:
             if validation is None:
                 validation = round(1. - train - (test or 0.), 6)
@@ -72,6 +105,8 @@ def process_splits(fn: Callable):
                 _splits["test"] = test
         _splits.update(splits or {})  # override defaults, add arbitrary extra
         split_total = sum(_splits.values())
+        if split_total <= 0.:
+            raise ValueError(f"Split fractions must have a positive total: {_splits}")
         _splits = {key: val / split_total for key, val in _splits.items()}
         pprint_dict(_splits, message="[INFO] Inferred these split proportions")
 

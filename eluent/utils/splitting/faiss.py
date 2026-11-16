@@ -34,6 +34,9 @@ def add_faiss_index(
     from providence.package_data import configure_hf_cache
     from providence.io import hasher, _lock_path
 
+    from .utils import check_new_columns
+    check_new_columns(ds.column_names, [fingerprint_column], "FAISS fingerprint")
+
     cache, *_ = configure_hf_cache(cache)
     ds_fingerprint = ds._fingerprint
     cache_key = "::".join([
