@@ -321,11 +321,7 @@ class SplitDataset:
             )
 
         ds = self.dataset[key]
-        check_new_columns(
-            ds.column_names,
-            [group_column] if isinstance(group_column, str) else list(group_column),
-            "group",
-        )
+        check_new_columns(ds.column_names, [group_column], "group")
         if preprocess is not None and isinstance(preprocess, Callable):
             ds, info = preprocess(ds)
         else:
@@ -734,9 +730,16 @@ class SplitDataset:
         batch_size: int = DEFAULT_BATCH_SIZE,
         splits: Mapping[str, float] | None = None,
         preprocess: Callable | None = None,
+        generated_column: str = "group",
         **kwargs
     ):
         """Annotate groups when requested, split the data, and return self.
+
+        With `method`, groups are generated: into `group_column` if it is a
+        string (and `generated_column` is ignored); otherwise into
+        `generated_column`, with the listed columns as further, existing axes.
+        For example, `method="scaffold"` with `group_column=["species",
+        "assay"]` splits on scaffold, species and assay groups.
 
         Examples
         ========
@@ -842,11 +845,9 @@ class SplitDataset:
         """
         from datasets import DatasetDict
         if method is not None:
-            # When group_column is a list/tuple, the method writes into
-            # group_column[0] only; the remaining columns are pre-existing axes
-            # used in the subsequent multiway split.  E.g. method="scaffold",
-            # group_column=["scaffold_grp", "species"] generates scaffold groups
-            # into "scaffold_grp" and then splits on both axes.
+            # A string names the column the method writes. A list or tuple
+            # names existing axes; the method writes `generated_column`, which
+            # becomes the first axis of the multiway split.
             if isinstance(group_column, str):
                 generated_column = group_column
             elif isinstance(group_column, (list, tuple)):
@@ -856,16 +857,21 @@ class SplitDataset:
                     raise ValueError(
                         f"group_column contains duplicate column names: {list(group_column)}."
                     )
-                generated_column = group_column[0]
-                # Secondary axes must already exist in the dataset.
+                if generated_column in group_column:
+                    raise ValueError(
+                        f"generated_column '{generated_column}' is also listed in "
+                        f"group_column {list(group_column)}; list only existing "
+                        "axes, or choose another generated_column."
+                    )
                 existing = set(self.dataset[key].column_names)
-                missing = [c for c in group_column[1:] if c not in existing]
+                missing = [c for c in group_column if c not in existing]
                 if missing:
                     raise ValueError(
-                        f"Secondary grouping columns {missing} not found in "
-                        f"split '{key}'.  These must already exist when "
-                        "method is not None."
+                        f"Grouping columns {missing} not found in split '{key}'. "
+                        "With a method, listed columns must already exist; "
+                        f"generated groups go in generated_column='{generated_column}'."
                     )
+                group_column = [generated_column, *group_column]
             else:
                 raise TypeError(
                     f"group_column must be a string, list, or tuple; "

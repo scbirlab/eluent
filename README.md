@@ -260,7 +260,7 @@ The default number of neighbours is 10. FAISS processing may require substantial
 
 #### Splitting by existing groups
 
-Use `--group-columns` to specify columns already containing group labels. This overrides `--type`.
+Use `--group-columns` to specify columns already containing group labels. Without `--type`, only these columns are used.
 
 ```bash
 eluent split molecules.csv \
@@ -288,6 +288,19 @@ Each axis is partitioned independently. An observation enters a fixed partition 
 For example, the training set contains observations whose scaffold and batch are both assigned to training.
 
 Rows with conflicting assignments are excluded from the corresponding fixed partitions. Consequently, achieved fractions may be substantially smaller than the requested fractions, which apply independently to each axis.
+
+Generated groups can be combined with existing axes by giving `--type` as well as `--group-columns`. The generated groups go in a `group` column and become the first axis:
+
+```bash
+eluent split molecules.csv \
+    --structure smiles \
+    --type scaffold \
+    --group-columns species assay \
+    --train 0.75 --test 0.25 \
+    --output demo/scaffold-species-assay.csv
+```
+
+In Python, pass `method="scaffold", group_column=["species", "assay"]`; `generated_column` (default `"group"`) names the column the method writes.
 
 This enables evaluation of generalisation along multiple dimensions, such as chemical scaffold, organism, or protein target.
 

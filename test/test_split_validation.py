@@ -128,3 +128,108 @@ def test_unrequested_partition_name_passes_through():
     )
     for part in result.split_dataset["fold_x"].values():
         assert part["test"] == part["g"]
+
+
+def test_precomputed_faiss_fingerprints_are_reused(tmp_path):
+    # An existing fingerprint column is input, not a clash.
+    pytest.importorskip("faiss")
+    import numpy as np
+    rng = np.random.default_rng(0)
+    emb = np.concatenate([rng.normal(0, 0.01, (8, 4)), rng.normal(5, 0.01, (8, 4))]).astype("float32")
+    data = Dataset.from_dict({"id": list(range(16)), "emb": emb.tolist()})
+    result = SplitDataset(data).group_and_split(
+        method="faiss", fingerprint_column="emb", n_neighbors=3,
+        cache=str(tmp_path), train=0.5, test=0.5,
+    )
+    train, test = result.split_dataset["fold_x"]["train"], result.split_dataset["fold_x"]["test"]
+    assert set(train["id"]).isdisjoint(test["id"])
+    assert set(train["id"]) | set(test["id"]) == set(range(16))
+    clusters = {frozenset(range(8)), frozenset(range(8, 16))}
+    assert {frozenset(train["id"]), frozenset(test["id"])} == clusters  # split by neighbourhood
+    assert np.allclose(np.asarray(list(train["emb"]) + list(test["emb"])).sum(), emb.sum(), rtol=1e-5)
+
+
+# Every (scaffold, species, assay) cell populated, so each axis can be split
+# independently and every intersection has rows.
+_CELLS = list(product(
+    ["c1ccccc1", "C1CCCCC1", "c1ccncc1", "C1CCNCC1"],  # four scaffolds
+    ["a", "b"],
+    ["x", "y"],
+)) * 2
+SPECIES_ASSAY = Dataset.from_dict({
+    "smiles": [s for s, _, _ in _CELLS],
+    "species": [p for _, p, _ in _CELLS],
+    "assay": [a for _, _, a in _CELLS],
+})
+
+
+def test_generated_groups_with_existing_axes():
+    result = SplitDataset(SPECIES_ASSAY).group_and_split(
+        method="scaffold", structure_column="smiles",
+        group_column=["species", "assay"], train=0.5, test=0.5,
+    )
+    assert result.split_info.group_columns == ("group", "species", "assay")
+    train, test = (result.split_dataset["fold_x"][k] for k in ("train", "test"))
+    assert len(train) > 0 and len(test) > 0
+    for column in ("group", "species", "assay"):  # disjoint on every axis
+        assert not set(train[column]) & set(test[column])
+    for part in (train, test):  # input columns untouched
+        assert set(part["species"]) <= {"a", "b"} and set(part["assay"]) <= {"x", "y"}
+
+
+def test_generated_axis_that_cannot_be_split_raises():
+    # One scaffold: the generated axis has a single group, so it cannot fill
+    # both partitions, however the other axes are split.
+    data = SPECIES_ASSAY.map(lambda _: {"smiles": "c1ccccc1"})
+    with pytest.raises(ValueError, match=r"empty after packing 1 groups from column 'group'"):
+        SplitDataset(data).group_and_split(
+            method="scaffold", structure_column="smiles",
+            group_column=["species", "assay"], train=0.5, test=0.5,
+        )
+
+
+def test_generated_column_name_and_errors():
+    result = SplitDataset(SPECIES_ASSAY).group_and_split(
+        method="scaffold", structure_column="smiles", group_column=["species"],
+        generated_column="scaffold", train=0.5, test=0.5,
+    )
+    assert result.split_info.group_columns == ("scaffold", "species")
+    with pytest.raises(ValueError, match=r"\['taxon'\] not found"):
+        SplitDataset(SPECIES_ASSAY).group_and_split(
+            method="scaffold", structure_column="smiles", group_column=["taxon"],
+            train=0.5, test=0.5,
+        )
+    with pytest.raises(ValueError, match=r"Input columns \['species'\] clash"):
+        SplitDataset(SPECIES_ASSAY).group_and_split(
+            method="scaffold", structure_column="smiles", group_column=["assay"],
+            generated_column="species", train=0.5, test=0.5,
+        )
+    with pytest.raises(ValueError, match=r"generated_column 'assay' is also listed"):
+        SplitDataset(SPECIES_ASSAY).group_and_split(
+            method="scaffold", structure_column="smiles", group_column=["assay"],
+            generated_column="assay", train=0.5, test=0.5,
+        )
+
+
+def test_cli_type_with_group_columns(tmp_path, monkeypatch):
+    import sys
+    import pandas as pd
+    from eluent.cli_module.cli import main
+    SPECIES_ASSAY.to_csv(str(tmp_path / "data.csv"), index=False)
+
+    def run(*flags):
+        out = tmp_path / f"out{len(list(tmp_path.iterdir()))}"
+        monkeypatch.setattr(sys, "argv", [
+            "eluent", "split", str(tmp_path / "data.csv"), "--structure", "smiles",
+            "--train", "0.5", "--test", "0.5", "--cache", str(tmp_path / "cache"),
+            "--output", str(out / "s.parquet"), *flags,
+        ])
+        main()
+        return pd.read_parquet(out / "s" / "fold_x" / "train.parquet")
+
+    # --type with --group-columns: scaffold groups are an extra axis.
+    assert "group" in run("--type", "scaffold", "--group-columns", "species", "assay").columns
+    # --group-columns alone: existing axes only, as before.
+    assert "group" not in run("--group-columns", "species", "assay").columns
+    # Neither: scaffold, as before.
+    assert "group" in run().columns

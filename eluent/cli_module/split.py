@@ -29,13 +29,17 @@ def _split(args: Namespace) -> None:
     )
 
     group_columns = args.group_columns
-    if group_columns is not None:
-        group_column = group_columns[0] if len(group_columns) == 1 else group_columns
-    else:
+    method = args.type
+    if group_columns is None:
         group_column = "group"
+        method = method or "scaffold"
+    elif method is None:
+        group_column = group_columns[0] if len(group_columns) == 1 else group_columns
+    else:  # generated groups, plus existing axes
+        group_column = list(group_columns)
 
     faiss_opts = {}
-    if not group_columns and args.type == "faiss":
+    if method == "faiss":
         faiss_opts = {
             "cache": cache,
             "n_neighbors": args.n_neighbors,
@@ -43,7 +47,7 @@ def _split(args: Namespace) -> None:
 
     ds = split_dataset(
         ds=resolved,
-        method=None if group_columns else args.type,
+        method=method,
         group_column=group_column,
         structure_column=args.structure,
         input_representation=args.input_representation,
